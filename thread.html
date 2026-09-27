@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scan thread — VibeAgent</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #050505; --elev: #0c0c0c; --border: #1a1a1a;
+      --text: #fafafa; --muted: #a1a1aa; --accent: #22c55e;
+      --warn: #eab308; --crit: #ef4444; --info: #3b82f6;
+      --font: Inter, system-ui, sans-serif; --mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+    header {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(5,5,5,0.9); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    }
+    header a { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
+    .job-id { font-family: var(--mono); font-size: 0.8rem; color: var(--accent); }
+    .status-pill {
+      font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+      background: rgba(34,197,94,0.15); color: var(--accent);
+    }
+    .status-pill.running { background: rgba(59,130,246,0.15); color: var(--info); }
+    .status-pill.error { background: rgba(239,68,68,0.15); color: var(--crit); }
+    main { max-width: 720px; margin: 0 auto; padding: 24px 16px 80px; }
+    .thread { display: flex; flex-direction: column; gap: 12px; }
+    .msg {
+      border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+      background: var(--elev); animation: fadeIn 0.25s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .msg .meta {
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+      margin-bottom: 6px; color: var(--muted);
+    }
+    .msg.system .meta { color: var(--info); }
+    .msg.agent .meta { color: var(--accent); }
+    .msg.tool .meta { color: var(--warn); }
+    .msg.finding .meta { color: var(--crit); }
+    .msg.pre { font-family: var(--mono); font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; color: var(--muted); max-height: 240px; overflow: auto; }
+    .msg p { font-size: 0.95rem; line-height: 1.5; white-space: pre-wrap; }
+    .empty { text-align: center; color: var(--muted); padding: 60px 20px; }
+    .report-box {
+      margin-top: 24px; border: 1px solid rgba(34,197,94,0.3); border-radius: 12px;
+      padding: 20px; background: rgba(34,197,94,0.06);
+    }
+    .report-box h2 { font-size: 1rem; margin-bottom: 12px; }
+    .report-box pre { font-family: var(--mono); font-size: 0.85rem; white-space: pre-wrap; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">← VibeAgent</a>
+    <span class="job-id" id="job-label">job —</span>
+    <span class="status-pill running" id="status">loading</span>
+  </header>
+  <main>
+    <div class="thread" id="thread"></div>
+    <div class="empty" id="empty">Waiting for events…</div>
+    <div class="report-box" id="report" hidden>
+      <h2>Final report</h2>
+      <pre id="report-text"></pre>
+    </div>
+  </main>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const jobId = params.get('job') || params.get('id') || '';
+    const thread = document.getElementById('thread');
+    const empty = document.getElementById('empty');
+    const statusEl = document.getElementById('status');
+    const jobLabel = document.getElementById('job-label');
+    jobLabel.textContent = jobId ? 'job ' + jobId : 'no job id';
+    const seen = new Set();
+
+    function addMsg(cls, meta, body, isPre) {
+      const key = cls + '|' + meta + '|' + (body || '').slice(0, 80);
+      if (seen.has(key)) return;
+      seen.add(key);
+      empty.hidden = true;
+      const div = document.createElement('div');
+      div.className = 'msg ' + cls;
+      div.innerHTML = '<div class="meta">' + meta + '</div>';
+      if (isPre) {
+        const pre = document.createElement('div');
+        pre.className = 'pre';
+        pre.textContent = body || '';
+        div.appendChild(pre);
+      } else {
+        const p = document.createElement('p');
+        p.textContent = body || '';
+        div.appendChild(p);
+      }
+      thread.appendChild(div);
+      div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    function renderEvents(events) {
+      for (const ev of events || []) {
+        const t = ev.type;
+        if (t === 'auth_ok') addMsg('system', 'system', 'Authorization accepted · ' + (ev.tier || '') + (ev.trial ? ' · trial' : '') + '\nTargets: ' + JSON.stringify(ev.targets));
+        else if (t === 'round') addMsg('system', 'round ' + ev.index + '/' + ev.max, 'Agent turn');
+        else if (t === 'agent_message') addMsg('agent', 'agent', ev.text);
+        else if (t === 'tool_start') addMsg('tool', 'tool → ' + ev.tool, JSON.stringify(ev.args || {}, null, 0), true);
+        else if (t === 'tool_result') addMsg('tool', 'tool ← ' + ev.tool + (ev.ok ? ' ok' : ' fail'), ev.preview, true);
+        else if (t === 'finding') addMsg('finding', 'finding · ' + (ev.severity || ''), ev.detail);
+        else if (t === 'error') addMsg('finding', 'error', ev.text);
+        else if (t === 'done') {
+          statusEl.textContent = ev.status || 'done';
+          statusEl.className = 'status-pill' + (ev.status === 'completed' || ev.status === 'dry_run_ok' ? '' : ' error');
+        }
+      }
+    }
+
+    async function poll() {
+      if (!jobId) {
+        const inline = sessionStorage.getItem('vibeagent_last_report');
+        if (inline) {
+          try {
+            const report = JSON.parse(inline);
+            statusEl.textContent = report.status || 'completed';
+            statusEl.className = 'status-pill';
+            renderEvents(report.events || []);
+            if (report.report_text) {
+              document.getElementById('report').hidden = false;
+              document.getElementById('report-text').textContent = report.report_text;
+            }
+            if (!(report.events || []).length && report.tool_calls) {
+              for (const tc of report.tool_calls) {
+                addMsg('tool', 'tool → ' + tc.tool, JSON.stringify(tc.args || {}), true);
+                const out = (tc.result && (tc.result.stdout || tc.result.message)) || tc.blocked || '';
+                addMsg('tool', 'tool ← ' + tc.tool, out.slice(0, 2500), true);
+              }
+            }
+            return;
+          } catch {}
+        }
+        statusEl.textContent = 'no job';
+        statusEl.className = 'status-pill error';
+        empty.textContent = 'No job id. Start a scan from /scan.html';
+        return;
+      }
+      try {
+        const res = await fetch('/api/job?id=' + encodeURIComponent(jobId));
+        const data = await res.json();
+        if (data.ok && data.report) {
+          const report = data.report;
+          statusEl.textContent = report.status || '…';
+          statusEl.className = 'status-pill' + (report.status === 'running' ? ' running' : (report.status === 'completed' || report.status === 'dry_run_ok' ? '' : ' error'));
+          renderEvents(report.events || []);
+          if (report.report_text) {
+            document.getElementById('report').hidden = false;
+            document.getElementById('report-text').textContent = report.report_text;
+          }
+          if (report.status === 'running') setTimeout(poll, 1500);
+        } else {
+          empty.textContent = (data.error || 'Job not found');
+          statusEl.textContent = 'missing';
+          statusEl.className = 'status-pill error';
+        }
+      } catch (e) {
+        empty.textContent = 'Could not reach /api/job.';
+        setTimeout(poll, 3000);
+      }
+    }
+    poll();
+  </script>
+</body>
+</html>
