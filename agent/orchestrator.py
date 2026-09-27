@@ -61,6 +61,9 @@ def run_job(
         "app_name": auth.app_name,
         "company_name": auth.company_name,
         "status": "planned" if dry_run else "running",
+        "model": None,
+        "provider": None,
+        "reasoning_effort": "none",
         "findings": [],
         "tool_calls": [],
         "errors": [],
@@ -95,7 +98,8 @@ def run_job(
         f"Targets (exact only): {json.dumps(auth.targets)}\n"
         f"App/Company: {auth.app_name or auth.company_name}\n"
         f"Run a scoped security assessment. Call tools only on the targets above.\n"
-        f"After tools return, synthesize a structured findings list."
+        f"If no API path was specified, use api_finder to guess common endpoints until hits appear.\n"
+        f"Narrate briefly what you are doing, then produce a structured findings list."
     )
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -120,10 +124,25 @@ def run_job(
             emit("done", status="model_error")
             return report
 
+        meta = completion.get("_vibeagent") or {}
+        if meta.get("model") and not report.get("model"):
+            report["model"] = meta.get("model")
+            report["provider"] = meta.get("provider")
+            report["reasoning_effort"] = meta.get("reasoning_effort") or "none"
+            emit(
+                "model_info",
+                model=report["model"],
+                provider=report.get("provider"),
+                reasoning_effort=report.get("reasoning_effort"),
+            )
+
         choice = (completion.get("choices") or [{}])[0]
         message = choice.get("message") or {}
         content = message.get("content")
         tool_calls = message.get("tool_calls") or []
+        reasoning = message.get("reasoning") or message.get("reasoning_content")
+        if reasoning:
+            emit("reasoning", text=str(reasoning)[:6000])
 
         assistant_msg: Dict[str, Any] = {"role": "assistant", "content": content}
         if tool_calls:
@@ -132,7 +151,7 @@ def run_job(
 
         if content:
             report["report_text"] = content
-            emit("agent_message", text=content[:4000])
+            emit("agent_message", text=content[:8000])
 
         if not tool_calls:
             break
@@ -188,12 +207,15 @@ def run_job(
         )
         try:
             completion = chat(messages, model=model, tools=None, max_tokens=2048)
+            meta = completion.get("_vibeagent") or {}
+            if meta.get("model"):
+                report["model"] = report.get("model") or meta.get("model")
             choice = (completion.get("choices") or [{}])[0]
             message = choice.get("message") or {}
             content = message.get("content")
             if content:
                 report["report_text"] = content
-                emit("agent_message", text=content[:4000])
+                emit("agent_message", text=content[:8000])
         except Exception as e:
             report["errors"].append(f"Synthesis failed: {e}")
 
@@ -224,7 +246,6 @@ def _dispatch_tool(name: str, args: Dict[str, Any], auth: Authorization) -> Any:
                 "stdout": (proc.stdout or "")[-6000:],
                 "stderr": (proc.stderr or "")[-1000:],
             }
-    # Serverless / no VibeHacking install: real HTTP probes
     builtin = run_builtin(name, args)
     if not builtin.get("stub"):
         return builtin
@@ -260,7 +281,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--access-code", default="", help="Trial / friends access code")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--model", default=None)
-    p.add_argument("--save", action="store_true", help="Persist job JSON under VIBEAGENT_JOBS_DIR")
+    p.add_argument("--save", action="store_true")
     args = p.parse_args(argv)
 
     auth = Authorization(
