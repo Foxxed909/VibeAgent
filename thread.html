@@ -79,7 +79,7 @@
     const seen = new Set();
 
     function addMsg(cls, meta, body, isPre) {
-      const key = cls + '|' + meta + '|' + (body || '').slice(0, 80);
+      const key = cls + '|' + meta + '|' + (body || '').slice(0, 120);
       if (seen.has(key)) return;
       seen.add(key);
       empty.hidden = true;
@@ -97,75 +97,94 @@
         div.appendChild(p);
       }
       thread.appendChild(div);
-      div.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
 
-    function renderEvents(events) {
-      for (const ev of events || []) {
+    function renderReport(report) {
+      if (!report) return false;
+      statusEl.textContent = report.status || 'completed';
+      statusEl.className = 'status-pill' + (
+        report.status === 'running' ? ' running' :
+        (report.status === 'completed' || report.status === 'dry_run_ok' ? '' : ' error')
+      );
+      const events = report.events || [];
+      for (const ev of events) {
         const t = ev.type;
         if (t === 'auth_ok') addMsg('system', 'system', 'Authorization accepted · ' + (ev.tier || '') + (ev.trial ? ' · trial' : '') + '\nTargets: ' + JSON.stringify(ev.targets));
         else if (t === 'round') addMsg('system', 'round ' + ev.index + '/' + ev.max, 'Agent turn');
         else if (t === 'agent_message') addMsg('agent', 'agent', ev.text);
-        else if (t === 'tool_start') addMsg('tool', 'tool → ' + ev.tool, JSON.stringify(ev.args || {}, null, 0), true);
+        else if (t === 'tool_start') addMsg('tool', 'tool → ' + ev.tool, JSON.stringify(ev.args || {}), true);
         else if (t === 'tool_result') addMsg('tool', 'tool ← ' + ev.tool + (ev.ok ? ' ok' : ' fail'), ev.preview, true);
         else if (t === 'finding') addMsg('finding', 'finding · ' + (ev.severity || ''), ev.detail);
         else if (t === 'error') addMsg('finding', 'error', ev.text);
         else if (t === 'done') {
-          statusEl.textContent = ev.status || 'done';
-          statusEl.className = 'status-pill' + (ev.status === 'completed' || ev.status === 'dry_run_ok' ? '' : ' error');
+          statusEl.textContent = ev.status || report.status || 'done';
         }
       }
+      // Fallback: synthesize from tool_calls if no events rendered
+      if (seen.size === 0 && report.tool_calls) {
+        for (const tc of report.tool_calls) {
+          addMsg('tool', 'tool → ' + tc.tool, JSON.stringify(tc.args || {}), true);
+          const out = (tc.result && (tc.result.stdout || tc.result.message)) || tc.blocked || '';
+          addMsg('tool', 'tool ← ' + tc.tool, String(out).slice(0, 2500), true);
+        }
+      }
+      if (report.report_text) {
+        document.getElementById('report').hidden = false;
+        document.getElementById('report-text').textContent = report.report_text;
+      }
+      if (report.findings && report.findings.length) {
+        for (const f of report.findings) {
+          addMsg('finding', 'finding · ' + (f.severity || 'info'), f.detail || JSON.stringify(f));
+        }
+      }
+      return true;
+    }
+
+    function loadFromSession() {
+      try {
+        const raw = sessionStorage.getItem('vibeagent_last_report');
+        if (!raw) return null;
+        const report = JSON.parse(raw);
+        // If URL has a job id, accept session report only if it matches (or no job_id on report)
+        if (jobId && report.job_id && report.job_id !== jobId) return null;
+        return report;
+      } catch { return null; }
     }
 
     async function poll() {
+      // 1) Prefer sessionStorage (scan response) — works on serverless without shared disk
+      const local = loadFromSession();
+      if (local) {
+        renderReport(local);
+        empty.hidden = true;
+        if (local.status !== 'running') return;
+      }
+
       if (!jobId) {
-        const inline = sessionStorage.getItem('vibeagent_last_report');
-        if (inline) {
-          try {
-            const report = JSON.parse(inline);
-            statusEl.textContent = report.status || 'completed';
-            statusEl.className = 'status-pill';
-            renderEvents(report.events || []);
-            if (report.report_text) {
-              document.getElementById('report').hidden = false;
-              document.getElementById('report-text').textContent = report.report_text;
-            }
-            if (!(report.events || []).length && report.tool_calls) {
-              for (const tc of report.tool_calls) {
-                addMsg('tool', 'tool → ' + tc.tool, JSON.stringify(tc.args || {}), true);
-                const out = (tc.result && (tc.result.stdout || tc.result.message)) || tc.blocked || '';
-                addMsg('tool', 'tool ← ' + tc.tool, out.slice(0, 2500), true);
-              }
-            }
-            return;
-          } catch {}
+        if (!local) {
+          statusEl.textContent = 'no job';
+          statusEl.className = 'status-pill error';
+          empty.textContent = 'No job data. Start a scan from /scan.html';
         }
-        statusEl.textContent = 'no job';
-        statusEl.className = 'status-pill error';
-        empty.textContent = 'No job id. Start a scan from /scan.html';
         return;
       }
+
+      // 2) Optional API poll (only works if durable store is configured)
       try {
         const res = await fetch('/api/job?id=' + encodeURIComponent(jobId));
         const data = await res.json();
         if (data.ok && data.report) {
-          const report = data.report;
-          statusEl.textContent = report.status || '…';
-          statusEl.className = 'status-pill' + (report.status === 'running' ? ' running' : (report.status === 'completed' || report.status === 'dry_run_ok' ? '' : ' error'));
-          renderEvents(report.events || []);
-          if (report.report_text) {
-            document.getElementById('report').hidden = false;
-            document.getElementById('report-text').textContent = report.report_text;
-          }
-          if (report.status === 'running') setTimeout(poll, 1500);
-        } else {
-          empty.textContent = (data.error || 'Job not found');
-          statusEl.textContent = 'missing';
-          statusEl.className = 'status-pill error';
+          sessionStorage.setItem('vibeagent_last_report', JSON.stringify(data.report));
+          renderReport(data.report);
+          if (data.report.status === 'running') setTimeout(poll, 1500);
+          return;
         }
-      } catch (e) {
-        empty.textContent = 'Could not reach /api/job.';
-        setTimeout(poll, 3000);
+      } catch (e) {}
+
+      if (!local) {
+        statusEl.textContent = 'missing';
+        statusEl.className = 'status-pill error';
+        empty.textContent = 'Job not found on server (serverless storage is ephemeral). Re-run the scan — results are shown from this browser session.';
       }
     }
     poll();
