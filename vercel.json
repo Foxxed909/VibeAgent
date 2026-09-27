@@ -1,5 +1,17 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "cleanUrls": true,
-  "trailingSlash": false
+  "trailingSlash": false,
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
+  "rewrites": [
+    { "source": "/api/scan", "destination": "/api/index" },
+    { "source": "/api/job", "destination": "/api/index" },
+    { "source": "/api/waitlist", "destination": "/api/index" }
+  ]
 }

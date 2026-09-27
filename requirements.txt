@@ -1,2 +1,2 @@
-# VibeAgent is stdlib-first. No required third-party packages for the scaffold.
-# Optional later: httpx, pydantic, etc.
+# Stdlib-first agent. No hard deps required for core scan path.
+# Leave empty intentionally so Vercel Python runtime stays lean.
