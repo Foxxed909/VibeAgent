@@ -1,10 +1,10 @@
-"""Authorized stress / load checks — NOT a DDoS tool.
+"""Authorized stress / load checks.
 
-Hard caps:
-- Requires enterprise tier OR valid trial code
-- Multipliers limited to x5 / x10 / x20 (no unbounded flood)
-- Short max duration, modest concurrency
-- Exact targets only (already scope-checked by caller)
+Modes:
+- capped (default): platform safety limits — Hobby/trial and Enterprise default
+- org: Enterprise-only — organization chooses higher limits (still finite for runtime safety)
+
+Never unbounded from this SaaS process; Vercel maxDuration still applies.
 """
 from __future__ import annotations
 
@@ -14,21 +14,34 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 UA = "VibeAgent-Stress/0.1 (+authorized-load-test)"
 
-# Hard product limits — do not raise without a deliberate security review
-ALLOWED_MULTIPLIERS = {5, 10, 20}
-MAX_DURATION_S = 30
-MAX_WORKERS = 8
-MAX_TOTAL_REQUESTS = 200
+CAPPED = {
+    "multipliers": {5, 10, 20},
+    "max_duration_s": 30,
+    "max_workers": 8,
+    "max_total_requests": 200,
+}
+
+# Enterprise org-managed: higher ceiling; org accepts operational risk on their targets
+ORG = {
+    "multipliers": {5, 10, 20, 50},
+    "max_duration_s": 120,
+    "max_workers": 32,
+    "max_total_requests": 2000,
+}
+
+# Back-compat export
+ALLOWED_MULTIPLIERS = CAPPED["multipliers"]
 
 
 @dataclass
 class StressResult:
     url: str
     multiplier: int
+    mode: str
     planned_requests: int
     completed: int
     ok: int
@@ -40,8 +53,11 @@ class StressResult:
     note: str
 
 
+def _limits(mode: str) -> dict:
+    return ORG if mode == "org" else CAPPED
+
+
 def _one_get(url: str, headers: Dict[str, str], timeout: float) -> Tuple[int, bool]:
-    """Returns (status, is_challenge_like)."""
     req = urllib.request.Request(url, method="GET", headers=headers)
     ctx = ssl.create_default_context()
     try:
@@ -50,13 +66,11 @@ def _one_get(url: str, headers: Dict[str, str], timeout: float) -> Tuple[int, bo
             st = resp.getcode() or 0
             hdrs = {k.lower(): v for k, v in resp.headers.items()}
             from .cf_detect import is_challenge_page
-
             return st, is_challenge_page(st, body, hdrs)
     except urllib.error.HTTPError as e:
         body = e.read(4000).decode("utf-8", errors="replace") if e.fp else ""
         hdrs = {k.lower(): v for k, v in (e.headers.items() if e.headers else [])}
         from .cf_detect import is_challenge_page
-
         return e.code or 0, is_challenge_page(e.code or 0, body, hdrs)
     except Exception:
         return 0, False
@@ -66,15 +80,22 @@ def run_stress(
     url: str,
     *,
     multiplier: int = 5,
-    duration_s: int = 10,
+    duration_s: Optional[int] = None,
     cookie: Optional[str] = None,
+    mode: str = "capped",
 ) -> StressResult:
-    if multiplier not in ALLOWED_MULTIPLIERS:
-        raise ValueError(f"multiplier must be one of {sorted(ALLOWED_MULTIPLIERS)}")
-    duration_s = max(3, min(int(duration_s), MAX_DURATION_S))
-    # Base ~2 rps equivalent * multiplier, capped by MAX_TOTAL_REQUESTS
-    planned = min(MAX_TOTAL_REQUESTS, max(multiplier * duration_s, multiplier * 3))
-    workers = min(MAX_WORKERS, max(2, multiplier // 2))
+    mode = "org" if mode == "org" else "capped"
+    lim = _limits(mode)
+    if multiplier not in lim["multipliers"]:
+        raise ValueError(f"multiplier must be one of {sorted(lim['multipliers'])} for mode={mode}")
+
+    max_dur = lim["max_duration_s"]
+    if duration_s is None:
+        duration_s = min(15 if mode == "capped" else 60, max_dur)
+    duration_s = max(3, min(int(duration_s), max_dur))
+
+    planned = min(lim["max_total_requests"], max(multiplier * duration_s, multiplier * 3))
+    workers = min(lim["max_workers"], max(2, multiplier // 2))
 
     headers = {"User-Agent": UA, "Accept": "*/*"}
     if cookie:
@@ -104,15 +125,16 @@ def run_stress(
 
     elapsed = max(time.time() - t0, 0.001)
     note = (
-        "Authorized stress sample only — capped concurrency and duration. "
-        "Not a DDoS tool. Challenge pages counted separately."
+        f"Stress mode={mode}. "
+        + ("Platform safety caps." if mode == "capped" else "Org-managed higher limits; org accepts operational risk on owned targets.")
     )
     if challenge:
-        note += " Bot/CDN challenges observed; allowlist scanner or supply cf_clearance for owned zones."
+        note += " Bot/CDN challenges observed."
 
     return StressResult(
         url=url,
         multiplier=multiplier,
+        mode=mode,
         planned_requests=planned,
         completed=completed,
         ok=ok,
@@ -126,11 +148,10 @@ def run_stress(
 
 
 def format_stress(result: StressResult) -> str:
-    lines = [
-        f"Stress x{result.multiplier} on {result.url}",
+    return "\n".join([
+        f"Stress x{result.multiplier} mode={result.mode} on {result.url}",
         f"completed={result.completed}/{result.planned_requests} in {result.duration_s}s (~{result.rps} rps)",
         f"ok={result.ok} fail={result.fail} challenge={result.challenge}",
         f"status_counts={result.status_counts}",
         result.note,
-    ]
-    return "\n".join(lines)
+    ])
