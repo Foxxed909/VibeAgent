@@ -2,39 +2,28 @@
 
 Affordable autonomous **authorized** security testing.
 
-- **Hobby** — $50 / scan · exact URLs + `*.vercel.app` only
+- **Hobby** — $50 / scan · exact URLs + `*.vercel.app` only · trial code supported
 - **Enterprise** — $200 / scan · hosts, URLs, IP ranges
 
-Powered by the [VibeHacking](https://github.com/Foxxed909/VibeHacking) tool surface. Agents only operate against the exact targets the user declares and confirms.
+Powered by [VibeHacking](https://github.com/Foxxed909/VibeHacking) tools. Agents only operate against exact targets the user declares and confirms.
 
-## Repo layout
+## Live thread
 
-```
-index.html          # Landing page
-scan.html           # Hobby / Enterprise authorization form (exact targets + phrase)
-agent/              # Orchestrator scaffold
-  scope.py          # Exact-target enforcement + Hobby vercel.app rule
-  models.py         # OpenRouter free-model client
-  tools_catalog.py  # VibeHacking tool descriptions + system prompt
-  orchestrator.py   # validate → plan → model → scope-check tools → report
-  cli.py
-api/
-  waitlist.py       # Vercel serverless waitlist stub
-```
+After you start a scan from `/scan.html`, you are redirected to `/thread.html?job=…` where agent steps stream (tool calls, findings, final report).
 
-## Quick start (orchestrator)
+## Quick start
 
 ```bash
-# dry-run (no API key needed)
 python -m agent.cli --tier hobby --target https://my-app.vercel.app --app-name MyApp --dry-run
 
-# live model call (requires key)
-export OPENROUTER_API_KEY=sk-or-...
-export VIBEHACKING_ROOT=/path/to/VibeHacking   # optional: run real tools
-python -m agent.cli --tier hobby --target https://my-app.vercel.app --app-name MyApp
+export OPENAI_API_KEY=sk-...
+export VIBEHACKING_ROOT=/path/to/VibeHacking
+python -m agent.cli --tier hobby --target https://my-app.vercel.app --app-name MyApp \
+  --access-code 'YOUR_TRIAL_CODE' --model gpt-6-luna --save
 ```
 
-Confirmation phrase (required):
+Confirmation phrase:
+
 ```
 I OWN OR AM AUTHORIZED TO TEST THESE TARGETS
 ```
@@ -42,18 +31,21 @@ I OWN OR AM AUTHORIZED TO TEST THESE TARGETS
 ## Deploy on Vercel
 
 1. Import this repo at [vercel.com/new](https://vercel.com/new)
-2. Framework: **Other** (static + optional Python serverless under `/api`)
-3. Deploy → `*.vercel.app` URL
+2. Framework: **Other**
+3. Set env: `OPENAI_API_KEY` and/or `OPENROUTER_API_KEY`
+4. Deploy
 
 ## Status
 
 - [x] Landing page
-- [x] Authorization form (`/scan.html`) — Hobby + Enterprise text schema
-- [x] Agent orchestrator scaffold (scope lock, OpenRouter free models, VibeHacking tool catalog)
-- [x] Waitlist API stub (`/api/waitlist`)
-- [ ] Persistent job queue + report delivery
+- [x] Authorization form + trial access code
+- [x] Agent orchestrator (multi-round tool loop)
+- [x] OpenAI GPT-6 Luna / GPT-5.6 Luna + OpenRouter free models
+- [x] Live scan thread UI
+- [x] `/api/scan` + `/api/job`
+- [ ] Persistent cloud job store (currently `/tmp` on serverless)
 - [ ] Billing
 
 ## Golden rule
 
-Only ever test apps you own or have explicit written authorization to test.
+Only ever test apps you own or have explicit authorization to test.
