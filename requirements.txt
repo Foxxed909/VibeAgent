@@ -1,0 +1,2 @@
+# VibeAgent is stdlib-first. No required third-party packages for the scaffold.
+# Optional later: httpx, pydantic, etc.
