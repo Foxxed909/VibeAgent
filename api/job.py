@@ -1,2 +1,2 @@
-"""Legacy handler — disabled. Use api/index.py."""
-from api.index import app  # noqa: F401
+# Deprecated — Vercel entrypoint is api/index.py (ASGI app).
+# Do not define handler/app here.
