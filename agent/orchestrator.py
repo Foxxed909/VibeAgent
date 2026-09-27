@@ -9,10 +9,12 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urljoin
 
-from .models import chat, OpenRouterError, DEFAULT_MODEL
+from .models import chat, OpenRouterError
 from .scope import Authorization, ScopeError, assert_url_in_scope, CONFIRM_PHRASE, is_valid_trial_code
 from .tools_catalog import VIBEHACKING_TOOLS, SYSTEM_PROMPT
+from .depth import get_depth, DepthProfile
 
 try:
     from .openai_client import OpenAIError
@@ -26,9 +28,7 @@ except ImportError:
         return {"stub": True, "message": f"http_tools missing for {name}"}
 
 VIBEHACKING_ROOT = os.environ.get("VIBEHACKING_ROOT", "")
-MAX_ROUNDS = int(os.environ.get("VIBEAGENT_MAX_ROUNDS", "6"))
 JOBS_DIR = Path(os.environ.get("VIBEAGENT_JOBS_DIR", "/tmp/vibeagent_jobs"))
-
 EventCb = Optional[Callable[[Dict[str, Any]], None]]
 
 
@@ -48,10 +48,16 @@ def run_job(
     model: Optional[str] = None,
     on_event: EventCb = None,
     job_id: Optional[str] = None,
+    depth: str = "standard",
+    stress_multiplier: Optional[int] = None,
+    cookie: Optional[str] = None,
 ) -> Dict[str, Any]:
     auth = auth.validated()
     trial = is_valid_trial_code(auth.access_code)
     job_id = job_id or str(uuid.uuid4())[:12]
+    profile = get_depth(depth)
+    if cookie:
+        os.environ["VIBEAGENT_COOKIE"] = cookie
 
     report: Dict[str, Any] = {
         "job_id": job_id,
@@ -61,6 +67,7 @@ def run_job(
         "app_name": auth.app_name,
         "company_name": auth.company_name,
         "status": "planned" if dry_run else "running",
+        "depth": profile.name,
         "model": None,
         "provider": None,
         "reasoning_effort": "none",
@@ -69,6 +76,7 @@ def run_job(
         "errors": [],
         "events": [],
         "report_text": None,
+        "stress": None,
     }
 
     def emit(kind: str, **kwargs: Any) -> None:
@@ -76,65 +84,105 @@ def run_job(
         report["events"].append(ev)
         _emit(on_event, ev)
 
-    emit("auth_ok", tier=auth.tier, trial=trial, targets=auth.targets)
+    emit("auth_ok", tier=auth.tier, trial=trial, targets=auth.targets, depth=profile.name)
 
     if dry_run:
         report["plan"] = [
-            f"Validate confirmation phrase ({CONFIRM_PHRASE!r})",
-            f"Trial access: {trial}",
-            f"Scope lock to: {auth.targets}",
-            "Recon: ash, vibe_headers, ghost, api_finder",
-            "Secrets: senoria",
-            "Compile evidence-based report",
+            f"Depth: {profile.name} (max_rounds={profile.max_rounds})",
+            f"Force api_finder={profile.force_api_finder}, follow_up={profile.follow_up_on_hits}",
+            f"Retries={profile.tool_retries}, timeout={profile.tool_timeout_s}s",
         ]
         report["status"] = "dry_run_ok"
         emit("done", status="dry_run_ok")
         return report
 
+    if stress_multiplier:
+        if not (trial or auth.tier == "enterprise"):
+            emit("error", text="Stress multipliers require Enterprise tier or trial access code.")
+        else:
+            try:
+                from .stress import run_stress, format_stress, ALLOWED_MULTIPLIERS
+                m = int(stress_multiplier)
+                if m not in ALLOWED_MULTIPLIERS:
+                    emit("error", text=f"Stress multiplier must be one of {sorted(ALLOWED_MULTIPLIERS)}")
+                else:
+                    for target in auth.targets:
+                        url = target if "://" in target else f"https://{target}"
+                        assert_url_in_scope(url, auth)
+                        emit("tool_start", tool="stress", args={"url": url, "multiplier": m})
+                        result = run_stress(url, multiplier=m, cookie=cookie)
+                        text = format_stress(result)
+                        report["stress"] = result.__dict__
+                        report["tool_calls"].append({"tool": "stress", "args": {"url": url, "multiplier": m}, "result": {"stdout": text}})
+                        emit("tool_result", tool="stress", ok=True, preview=text)
+            except Exception as e:
+                report["errors"].append(f"Stress failed: {e}")
+                emit("error", text=str(e))
+
     user_brief = (
-        f"Authorization accepted.\n"
-        f"Tier: {auth.tier}\n"
-        f"Trial: {trial}\n"
-        f"Targets (exact only): {json.dumps(auth.targets)}\n"
+        f"Authorization accepted.\nTier: {auth.tier}\nTrial: {trial}\n"
+        f"Depth: {profile.name} (up to {profile.max_rounds} rounds)\n"
+        f"Targets: {json.dumps(auth.targets)}\n"
         f"App/Company: {auth.app_name or auth.company_name}\n"
-        f"Run a scoped security assessment. Call tools only on the targets above.\n"
-        f"If no API path was specified, use api_finder to guess common endpoints until hits appear.\n"
-        f"Narrate briefly what you are doing, then produce a structured findings list."
+        f"MUST: recon, api_finder + follow-up, ghost/senoria, never quit on soft fail/challenge, "
+        f"end with ## Findings. Challenges are informational, not downtime."
     )
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_brief},
     ]
+    emit("agent_message", text=f"Starting {profile.name} assessment ({profile.max_rounds} max rounds).")
 
-    emit("agent_message", text="Starting scoped assessment.")
+    forced_tools = ["ash", "vibe_headers"]
+    if profile.force_api_finder:
+        forced_tools.append("api_finder")
+    forced_tools.extend(["ghost", "senoria"])
 
-    for round_i in range(MAX_ROUNDS):
-        emit("round", index=round_i + 1, max=MAX_ROUNDS)
+    for target in auth.targets:
+        base = target if "://" in target else f"https://{target}"
+        for tname in forced_tools:
+            args: Dict[str, Any] = {"url": base}
+            if tname == "api_finder":
+                args["max_paths"] = profile.max_paths_per_tool
+            _run_one_tool(tname, args, auth, report, emit, profile)
+            if tname == "api_finder" and profile.follow_up_on_hits:
+                last = report["tool_calls"][-1] if report["tool_calls"] else None
+                out = ((last or {}).get("result") or {}).get("stdout") or ""
+                for hit_url in _parse_api_hits(base, out):
+                    try:
+                        assert_url_in_scope(hit_url, auth)
+                    except ScopeError:
+                        continue
+                    _run_one_tool("vibe_headers", {"url": hit_url}, auth, report, emit, profile)
+
+    tool_digest = []
+    for tc in report["tool_calls"]:
+        preview = (tc.get("result") or {}).get("stdout") or tc.get("blocked") or ""
+        tool_digest.append(f"### {tc['tool']} {tc.get('args')}\n{preview[:2500]}")
+    messages.append({
+        "role": "user",
+        "content": (
+            "Forced recon results follow. Continue with extra in-scope probes if useful, "
+            "then write final ## Findings. Do not give up on challenges.\n\n"
+            + "\n\n".join(tool_digest[:20])
+        ),
+    })
+
+    for round_i in range(profile.max_rounds):
+        emit("round", index=round_i + 1, max=profile.max_rounds)
         try:
-            completion = chat(
-                messages,
-                model=model,
-                tools=VIBEHACKING_TOOLS,
-                max_tokens=4096,
-            )
+            completion = chat(messages, model=model, tools=VIBEHACKING_TOOLS, max_tokens=4096)
         except (OpenRouterError, OpenAIError) as e:
-            report["status"] = "model_error"
             report["errors"].append(str(e))
             emit("error", text=str(e))
-            emit("done", status="model_error")
-            return report
+            break
 
         meta = completion.get("_vibeagent") or {}
         if meta.get("model") and not report.get("model"):
             report["model"] = meta.get("model")
             report["provider"] = meta.get("provider")
             report["reasoning_effort"] = meta.get("reasoning_effort") or "none"
-            emit(
-                "model_info",
-                model=report["model"],
-                provider=report.get("provider"),
-                reasoning_effort=report.get("reasoning_effort"),
-            )
+            emit("model_info", model=report["model"], provider=report.get("provider"), reasoning_effort=report.get("reasoning_effort"))
 
         choice = (completion.get("choices") or [{}])[0]
         message = choice.get("message") or {}
@@ -148,11 +196,9 @@ def run_job(
         if tool_calls:
             assistant_msg["tool_calls"] = tool_calls
         messages.append(assistant_msg)
-
         if content:
             report["report_text"] = content
             emit("agent_message", text=content[:8000])
-
         if not tool_calls:
             break
 
@@ -169,90 +215,131 @@ def run_job(
             try:
                 if url:
                     assert_url_in_scope(url, auth)
-                result = _dispatch_tool(name, args, auth)
+                result = _dispatch_tool(name, args, auth, profile)
                 report["tool_calls"].append({"tool": name, "args": args, "result": result})
                 out = result.get("stdout") or result.get("message") or json.dumps(result)[:3000]
                 emit("tool_result", tool=name, ok=True, preview=(out or "")[:2500])
-                if name == "vibe_headers" and out:
-                    for line in out.splitlines():
-                        if "CRITICAL" in line or "MISSING:" in line:
-                            report["findings"].append(
-                                {"severity": "critical", "tool": name, "detail": line.strip()}
-                            )
-                            emit("finding", severity="critical", detail=line.strip())
-                messages.append(
-                    {"role": "tool", "tool_call_id": tc_id, "content": (out or "")[:6000]}
-                )
+                _harvest_findings(name, out, report, emit)
+                messages.append({"role": "tool", "tool_call_id": tc_id, "content": (out or "")[:6000]})
             except ScopeError as e:
                 report["errors"].append(f"Scope violation blocked: {e}")
-                report["tool_calls"].append({"tool": name, "args": args, "blocked": str(e)})
                 emit("tool_result", tool=name, ok=False, preview=str(e))
                 messages.append({"role": "tool", "tool_call_id": tc_id, "content": f"BLOCKED: {e}"})
             except Exception as e:
                 report["errors"].append(f"Tool {name} failed: {e}")
                 emit("tool_result", tool=name, ok=False, preview=str(e))
                 messages.append({"role": "tool", "tool_call_id": tc_id, "content": f"ERROR: {e}"})
-    else:
-        emit("agent_message", text="Max rounds reached; compiling from tool output.")
 
-    if not report.get("report_text") and report["tool_calls"]:
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "Based on the tool results above, write a concise findings report. "
-                    "List severity, evidence, and fix hints. No false positives from SPA catch-alls."
-                ),
-            }
-        )
+    if profile.require_final_report and (
+        not report.get("report_text") or "## Findings" not in (report.get("report_text") or "")
+    ):
+        messages.append({
+            "role": "user",
+            "content": (
+                "Write the final report with a ## Findings section. "
+                "Severity, evidence, URL, fix hints. Challenges are informational."
+            ),
+        })
         try:
-            completion = chat(messages, model=model, tools=None, max_tokens=2048)
+            completion = chat(messages, model=model, tools=None, max_tokens=3072)
             meta = completion.get("_vibeagent") or {}
             if meta.get("model"):
                 report["model"] = report.get("model") or meta.get("model")
             choice = (completion.get("choices") or [{}])[0]
-            message = choice.get("message") or {}
-            content = message.get("content")
+            content = (choice.get("message") or {}).get("content")
             if content:
                 report["report_text"] = content
                 emit("agent_message", text=content[:8000])
         except Exception as e:
             report["errors"].append(f"Synthesis failed: {e}")
+            report["report_text"] = _local_findings_fallback(report)
+            emit("agent_message", text=report["report_text"])
 
     report["status"] = "completed"
     emit("done", status="completed", findings=len(report["findings"]))
     return report
 
 
-def _dispatch_tool(name: str, args: Dict[str, Any], auth: Authorization) -> Any:
+def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile) -> None:
+    emit("tool_start", tool=name, args=args)
+    last_err = None
+    for attempt in range(1, profile.tool_retries + 1):
+        try:
+            if args.get("url"):
+                assert_url_in_scope(args["url"], auth)
+            result = _dispatch_tool(name, args, auth, profile)
+            report["tool_calls"].append({"tool": name, "args": args, "result": result})
+            out = result.get("stdout") or result.get("message") or json.dumps(result)[:3000]
+            emit("tool_result", tool=name, ok=True, preview=(out or "")[:2500])
+            _harvest_findings(name, out, report, emit)
+            if "[CHALLENGE]" in (out or ""):
+                emit("finding", severity="info", detail=f"Bot/CDN challenge during {name}")
+            return
+        except ScopeError as e:
+            report["errors"].append(str(e))
+            emit("tool_result", tool=name, ok=False, preview=str(e))
+            return
+        except Exception as e:
+            last_err = e
+            time.sleep(0.4 * attempt)
+    report["errors"].append(f"Tool {name} failed after retries: {last_err}")
+    emit("tool_result", tool=name, ok=False, preview=str(last_err))
+
+
+def _parse_api_hits(base: str, stdout: str) -> List[str]:
+    hits = []
+    for line in (stdout or "").splitlines():
+        if "→" not in line or "CHALLENGE" in line:
+            continue
+        path = line.split("→")[0].strip().split()[0]
+        if not path.startswith("/"):
+            continue
+        hits.append(urljoin(base.rstrip("/") + "/", path.lstrip("/")))
+    return hits[:12]
+
+
+def _harvest_findings(name: str, out: str, report: Dict[str, Any], emit) -> None:
+    if not out:
+        return
+    for line in out.splitlines():
+        if "MISSING:" in line or "CRITICAL" in line:
+            detail = line.strip()
+            report["findings"].append({"severity": "critical", "tool": name, "detail": detail})
+            emit("finding", severity="critical", detail=detail)
+        if "POSSIBLE exposure" in line:
+            report["findings"].append({"severity": "high", "tool": name, "detail": line.strip()})
+            emit("finding", severity="high", detail=line.strip())
+
+
+def _local_findings_fallback(report: Dict[str, Any]) -> str:
+    lines = ["## Findings", ""]
+    if report.get("findings"):
+        for f in report["findings"]:
+            lines.append(f"- **{f.get('severity', 'info')}** ({f.get('tool')}): {f.get('detail')}")
+    else:
+        lines.append("- No automated critical findings harvested. Review tool transcripts above.")
+    return "\n".join(lines)
+
+
+def _dispatch_tool(name: str, args: Dict[str, Any], auth: Authorization, profile: Optional[DepthProfile] = None) -> Any:
     url = args.get("url") or ""
     if VIBEHACKING_ROOT:
         script = Path(VIBEHACKING_ROOT) / "TOOLS" / f"{name}.py"
-        if not script.exists() and name == "vibe_headers":
-            for alt in ("vibe_headers.py",):
-                cand = Path(VIBEHACKING_ROOT) / "TOOLS" / alt
-                if cand.exists():
-                    script = cand
-                    break
         if script.exists():
-            cmd = [sys.executable, str(script), "--url", url]
-            if name == "traversal_sniper" and args.get("app_root"):
-                cmd.extend(["--app-root", args["app_root"]])
             proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=120, cwd=VIBEHACKING_ROOT
+                [sys.executable, str(script), "--url", url],
+                capture_output=True, text=True,
+                timeout=(profile.tool_timeout_s if profile else 20),
+                cwd=VIBEHACKING_ROOT,
             )
-            return {
-                "returncode": proc.returncode,
-                "stdout": (proc.stdout or "")[-6000:],
-                "stderr": (proc.stderr or "")[-1000:],
-            }
+            return {"returncode": proc.returncode, "stdout": (proc.stdout or "")[-6000:], "stderr": (proc.stderr or "")[-1000:]}
+    if name == "api_finder" and profile:
+        args = dict(args)
+        args["max_paths"] = profile.max_paths_per_tool
     builtin = run_builtin(name, args)
     if not builtin.get("stub"):
         return builtin
-    return {
-        "stub": True,
-        "message": f"Tool {name} acknowledged for {url}. Set VIBEHACKING_ROOT for full tool suite.",
-    }
+    return {"stub": True, "message": f"Tool {name} acknowledged for {url}."}
 
 
 def save_job(report: Dict[str, Any]) -> Path:
@@ -267,53 +354,3 @@ def load_job(job_id: str) -> Optional[Dict[str, Any]]:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def main(argv: Optional[List[str]] = None) -> int:
-    import argparse
-
-    p = argparse.ArgumentParser(description="VibeAgent orchestrator")
-    p.add_argument("--tier", choices=["hobby", "enterprise"], default="hobby")
-    p.add_argument("--target", action="append", default=[], help="Exact target (repeatable)")
-    p.add_argument("--app-name", default="")
-    p.add_argument("--company-name", default="")
-    p.add_argument("--confirm", default="", help=f"Must be exactly: {CONFIRM_PHRASE}")
-    p.add_argument("--access-code", default="", help="Trial / friends access code")
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--model", default=None)
-    p.add_argument("--save", action="store_true")
-    args = p.parse_args(argv)
-
-    auth = Authorization(
-        tier=args.tier,
-        targets=args.target or ["http://127.0.0.1:3456"],
-        confirmation=args.confirm or CONFIRM_PHRASE,
-        app_name=args.app_name or ("local-demo" if args.tier == "hobby" else None),
-        company_name=args.company_name or ("Demo Corp" if args.tier == "enterprise" else None),
-        access_code=args.access_code or None,
-    )
-
-    def print_event(ev: Dict[str, Any]) -> None:
-        kind = ev.get("type")
-        if kind == "tool_start":
-            print(f"  → {ev.get('tool')} {ev.get('args')}", file=sys.stderr)
-        elif kind == "tool_result":
-            print(f"  ← {ev.get('tool')} ok={ev.get('ok')}", file=sys.stderr)
-        elif kind == "agent_message":
-            print(f"  ✎ {(ev.get('text') or '')[:120]}", file=sys.stderr)
-        elif kind == "finding":
-            print(f"  ! {ev.get('severity')}: {ev.get('detail')}", file=sys.stderr)
-
-    try:
-        report = run_job(auth, dry_run=args.dry_run, model=args.model, on_event=print_event)
-    except ScopeError as e:
-        print(json.dumps({"status": "refused", "error": str(e)}, indent=2))
-        return 2
-    if args.save or not args.dry_run:
-        save_job(report)
-    print(json.dumps(report, indent=2))
-    return 0 if report.get("status") in ("completed", "dry_run_ok") else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
