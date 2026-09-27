@@ -19,6 +19,12 @@ try:
 except ImportError:
     OpenAIError = OpenRouterError  # type: ignore
 
+try:
+    from .http_tools import run_builtin
+except ImportError:
+    def run_builtin(name: str, args: Dict[str, Any]) -> Dict[str, Any]:  # type: ignore
+        return {"stub": True, "message": f"http_tools missing for {name}"}
+
 VIBEHACKING_ROOT = os.environ.get("VIBEHACKING_ROOT", "")
 MAX_ROUNDS = int(os.environ.get("VIBEAGENT_MAX_ROUNDS", "6"))
 JOBS_DIR = Path(os.environ.get("VIBEAGENT_JOBS_DIR", "/tmp/vibeagent_jobs"))
@@ -218,9 +224,13 @@ def _dispatch_tool(name: str, args: Dict[str, Any], auth: Authorization) -> Any:
                 "stdout": (proc.stdout or "")[-6000:],
                 "stderr": (proc.stderr or "")[-1000:],
             }
+    # Serverless / no VibeHacking install: real HTTP probes
+    builtin = run_builtin(name, args)
+    if not builtin.get("stub"):
+        return builtin
     return {
         "stub": True,
-        "message": f"Tool {name} acknowledged for {url}. Set VIBEHACKING_ROOT to execute real tools.",
+        "message": f"Tool {name} acknowledged for {url}. Set VIBEHACKING_ROOT for full tool suite.",
     }
 
 
