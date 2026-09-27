@@ -1,0 +1,6 @@
+{
+  "name": "vibeagent",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Static site + Python /api handlers — not a Node app"
+}
