@@ -47,6 +47,11 @@
     .error { color: var(--danger); font-size: 0.9rem; margin-bottom: 12px; }
     .success { color: var(--accent); font-size: 0.9rem; margin-top: 16px; }
     .back { display: inline-block; margin-bottom: 24px; color: var(--text-muted); font-size: 0.9rem; }
+    .trial-box {
+      background: var(--accent-dim); border: 1px solid rgba(34,197,94,0.3);
+      border-radius: 8px; padding: 14px 16px; margin-bottom: 24px; font-size: 0.9rem;
+    }
+    .trial-box code { font-family: var(--mono); font-size: 0.8rem; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -55,12 +60,22 @@
     <h1>Start a scan</h1>
     <p class="sub">Exact targets only. Type the confirmation phrase to proceed.</p>
 
+    <div class="trial-box">
+      <strong>Trial / friends access</strong><br/>
+      Enter the access code below to try Hobby scans free.<br/>
+      Code: <code>9954FA-67£54CD-GROKJAILEDBROKE£D</code>
+    </div>
+
     <div class="tier-toggle">
       <button type="button" class="active" data-tier="hobby">Hobby</button>
       <button type="button" data-tier="enterprise">Enterprise</button>
     </div>
 
     <form id="scan-form">
+      <label for="access_code">Access code (optional — trial / friends)</label>
+      <input id="access_code" name="access_code" placeholder="9954FA-67£54CD-GROKJAILEDBROKE£D" autocomplete="off" />
+      <p class="hint">Leave blank if paying. Valid trial code unlocks Hobby without payment.</p>
+
       <div id="hobby-fields">
         <label for="app_name">App / project name</label>
         <input id="app_name" name="app_name" placeholder="MiniCloud" required />
@@ -94,6 +109,7 @@
 
   <script>
     const CONFIRM = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS";
+    const TRIAL_CODE = "9954FA-67£54CD-GROKJAILEDBROKE£D";
     let tier = "hobby";
     const hobbyBtn = document.querySelector('[data-tier="hobby"]');
     const entBtn = document.querySelector('[data-tier="enterprise"]');
@@ -122,6 +138,14 @@
       const ok = document.getElementById("success");
       err.hidden = true; ok.hidden = true;
 
+      const accessCode = document.getElementById("access_code").value.trim();
+      const isTrial = accessCode === TRIAL_CODE;
+      if (accessCode && !isTrial) {
+        err.textContent = "Invalid access code.";
+        err.hidden = false;
+        return;
+      }
+
       const confirm = document.getElementById("confirm").value.trim();
       if (confirm !== CONFIRM) {
         err.textContent = "Confirmation phrase does not match. Scan refused.";
@@ -135,8 +159,9 @@
         err.hidden = false;
         return;
       }
-      // Client-side hobby check
-      if (tier === "hobby") {
+
+      const effectiveTier = isTrial ? "hobby" : tier;
+      if (effectiveTier === "hobby") {
         for (const t of targets) {
           const low = t.toLowerCase();
           const vercelOk = low === "*.vercel.app" || (low.endsWith(".vercel.app") && !low.includes("*"));
@@ -150,9 +175,11 @@
       }
 
       const payload = {
-        tier,
+        tier: effectiveTier,
         targets,
         confirmation: confirm,
+        access_code: isTrial ? accessCode : null,
+        trial: isTrial,
         app_name: document.getElementById("app_name").value.trim(),
         company_name: document.getElementById("company_name").value.trim(),
         contact_email: document.getElementById("contact_email").value.trim(),
@@ -160,7 +187,9 @@
         note: document.getElementById("note").value.trim(),
       };
       console.log("Authorization payload", payload);
-      ok.textContent = "Authorization accepted (client-side). Agent queue comes next — payload logged to console.";
+      ok.textContent = isTrial
+        ? "Trial code accepted. Authorization OK — Hobby scan queued (client-side)."
+        : "Authorization accepted (client-side). Agent queue comes next — payload logged to console.";
       ok.hidden = false;
     };
   </script>
