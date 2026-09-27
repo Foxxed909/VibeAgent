@@ -1,5 +1,4 @@
-"""Model router: OpenAI (preferred when key set) or OpenRouter free models.
-"""
+"""Model router: OpenAI (preferred when key set) or OpenRouter free models."""
 from __future__ import annotations
 
 import json
@@ -23,15 +22,14 @@ class OpenRouterError(RuntimeError):
 
 
 def chat(
-    messages: List[Dict[str, str]],
+    messages: List[Dict[str, Any]],
     *,
     model: Optional[str] = None,
     temperature: float = 0.2,
     max_tokens: int = 2048,
     tools: Optional[List[Dict[str, Any]]] = None,
-    reasoning_effort: Optional[str] = "medium",
+    reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Route to OpenAI if OPENAI_API_KEY is set, else OpenRouter."""
     if os.environ.get("OPENAI_API_KEY", "").strip():
         from .openai_client import chat as openai_chat, DEFAULT_MODEL as OAI_DEFAULT
 
@@ -41,7 +39,7 @@ def chat(
             temperature=temperature,
             max_tokens=max_tokens,
             tools=tools,
-            reasoning_effort=reasoning_effort,
+            reasoning_effort=reasoning_effort or "none",
         )
     return _openrouter_chat(
         messages,
@@ -53,7 +51,7 @@ def chat(
 
 
 def _openrouter_chat(
-    messages: List[Dict[str, str]],
+    messages: List[Dict[str, Any]],
     *,
     model: Optional[str] = None,
     temperature: float = 0.2,
@@ -89,11 +87,17 @@ def _openrouter_chat(
     )
     try:
         with urllib.request.urlopen(req, timeout=90) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         raise OpenRouterError(f"OpenRouter HTTP {e.code}: {detail}") from e
 
+    data["_vibeagent"] = {
+        "provider": "openrouter",
+        "model": data.get("model") or model,
+        "reasoning_effort": "none",
+    }
+    return data
 
-# Back-compat alias
+
 DEFAULT_MODEL = DEFAULT_OPENROUTER

@@ -1,9 +1,6 @@
 """OpenAI API client for GPT-6 Luna / GPT-5.6 Luna.
 
-Set OPENAI_API_KEY in the environment. Default model: gpt-6-luna (cost-efficient).
-
-Note: Chat Completions + function tools on Luna requires reasoning_effort=none.
-Use /v1/responses for reasoning+tools together later if needed.
+Chat Completions + function tools requires reasoning_effort=none on Luna.
 """
 from __future__ import annotations
 
@@ -30,26 +27,26 @@ def chat(
     temperature: float = 0.2,
     max_tokens: int = 4096,
     tools: Optional[List[Dict[str, Any]]] = None,
-    reasoning_effort: Optional[str] = "medium",
+    reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not key:
         raise OpenAIError("OPENAI_API_KEY is not set.")
 
     model = model or os.environ.get("VIBEAGENT_MODEL") or DEFAULT_MODEL
+    # Keep reasoning OFF for tool-calling scans (stable + cheaper)
+    effort = "none" if tools else (reasoning_effort or "none")
+
     body: Dict[str, Any] = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_completion_tokens": max_tokens,
+        "reasoning_effort": effort,
     }
-    # Chat Completions + function tools requires reasoning_effort=none on Luna
     if tools:
         body["tools"] = tools
         body["tool_choice"] = "auto"
-        body["reasoning_effort"] = "none"
-    elif reasoning_effort:
-        body["reasoning_effort"] = reasoning_effort
 
     req = urllib.request.Request(
         OPENAI_URL,
@@ -62,7 +59,15 @@ def chat(
     )
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         raise OpenAIError(f"OpenAI HTTP {e.code}: {detail}") from e
+
+    # Normalize metadata for the thread UI
+    data["_vibeagent"] = {
+        "provider": "openai",
+        "model": data.get("model") or model,
+        "reasoning_effort": effort,
+    }
+    return data

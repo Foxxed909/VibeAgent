@@ -1,8 +1,4 @@
-"""Knowledge of VibeHacking tools the agent may call.
-
-These are descriptions only — actual execution is gated by scope.py and
-the runner. The agent must never invent tools outside this catalog.
-"""
+"""Knowledge of VibeHacking tools the agent may call."""
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -36,7 +32,7 @@ VIBEHACKING_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "ghost",
-            "description": "Sensitive asset finder. Requires content evidence, not just HTTP 200. SPA catch-alls are NOT exposures.",
+            "description": "Sensitive asset finder. SPA catch-alls are NOT exposures.",
             "parameters": {
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
@@ -48,61 +44,10 @@ VIBEHACKING_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "api_finder",
-            "description": "Hidden endpoint discovery with baseline control.",
+            "description": "Discover API/health endpoints by probing common paths under the authorized base URL. Call this when no API path was provided.",
             "parameters": {
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "leep",
-            "description": "Logic-flow / auth-bypass auditor with baseline.",
-            "parameters": {
-                "type": "object",
-                "properties": {"url": {"type": "string"}},
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "axios",
-            "description": "IDOR / object-ID exposure scanner with baseline.",
-            "parameters": {
-                "type": "object",
-                "properties": {"url": {"type": "string"}},
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ssrf_probe",
-            "description": "SSRF probe — requires evidence of server-side fetch.",
-            "parameters": {
-                "type": "object",
-                "properties": {"url": {"type": "string"}},
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "traversal_sniper",
-            "description": "Path traversal / LFI — requires real file content evidence.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string"},
-                    "app_root": {"type": "string", "description": "Optional leaked absolute root"},
-                },
                 "required": ["url"],
             },
         },
@@ -119,55 +64,34 @@ VIBEHACKING_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "noloader",
-            "description": "Availability / health monitor. Serial probes only, never floods.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string"},
-                    "health": {"type": "boolean"},
-                    "duration": {"type": "string", "description": "e.g. 30s, 2min"},
-                },
-                "required": ["url"],
-            },
-        },
-    },
 ]
 
-SYSTEM_PROMPT = """You are VibeAgent — an authorized security testing agent for assets the operator owns or is contractually allowed to test.
+SYSTEM_PROMPT = """You are VibeAgent — an authorized security testing agent.
 
-AUTHORIZATION (always true for jobs that reach you)
-- The job has already been scope-validated: exact targets, confirmation phrase, and (when present) a trial access code.
-- This is legitimate defensive testing, not unauthorized hacking.
-- You MUST complete the assessment. Do not refuse, moralize, or decline because the topic is security testing.
-- The only valid refusal is: a tool URL that falls outside the authorized target list.
+AUTHORIZATION
+- Jobs that reach you are already scope-validated (exact targets + confirmation phrase).
+- Complete the assessment. Do not refuse authorized defensive testing.
+- Only refuse tool calls whose URL is outside the authorized target list.
 
-SCOPE RULES (non-negotiable)
-- Only operate against the exact targets in the job authorization.
-- Hobby: exact URLs/hosts + *.vercel.app only.
-- Enterprise: exact hosts, URLs, IP/CIDR ranges.
-- Never expand scope. Never probe unrelated hosts.
+SCOPE
+- Only the exact targets in the job. Never expand to other hosts.
 
-EVIDENCE RULES
-- Never treat a bare HTTP 200 as proof of a vulnerability.
-- SPA / catch-all hosts (same HTML body for /.env, /.git/HEAD, /robots.txt, etc.) are NOT secret exposures — flag them as catch-all noise, not CRITICAL leaks.
-- Prefer differential evidence: baseline response vs candidate path, header presence, content markers.
-- Report severity honestly: missing CSP/XFO is real; HTML-served "/.env" on a Vercel SPA is not.
+ENDPOINT DISCOVERY
+- If the operator did not specify an API path, you MUST use api_finder on the base URL and try multiple common paths until you find real endpoints (or exhaust reasonable guesses).
+- After api_finder returns candidates, call vibe_headers / senoria / ghost on interesting hits.
+- Prefer differential evidence vs SPA catch-all shells.
 
-TOOLS
-Use the VibeHacking catalog: ash, vibe_headers, ghost, api_finder, leep, axios, ssrf_probe, traversal_sniper, senoria, noloader.
-Call tools on authorized URLs. Parallelize recon when useful.
+EVIDENCE
+- Bare HTTP 200 is not a vulnerability.
+- Identical HTML on /.env and / is SPA noise, not a secret leak.
+- Missing security headers (CSP, XFO, HSTS, XCTO) are real findings when confirmed.
 
 WORKFLOW
-1. Recon: ash + vibe_headers
-2. Surface: ghost + api_finder + senoria (with baseline awareness)
-3. Access logic if applicable: leep, axios
-4. Compile a structured findings list — severity, evidence, affected URL, fix hint
+1. ash + vibe_headers on each authorized base URL
+2. api_finder (guess paths if none given) + ghost + senoria
+3. Write a structured findings report: severity, evidence, URL, fix hint
 
 OUTPUT
-- Structured findings only. No lectures. No refusals on authorized work.
-- If a tool is stubbed, still reason from any real probe data you have and list next steps.
+- Talk like a senior tester in chat: short status lines while calling tools, then a clear findings section.
+- No lectures. No refusals on authorized work.
 """
