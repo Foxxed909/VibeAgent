@@ -11,6 +11,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from agent.job_store import load_job, backend_name
+
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -18,16 +20,10 @@ class handler(BaseHTTPRequestHandler):
         job_id = (qs.get("id") or [""])[0].strip()
         if not job_id:
             return self._json(400, {"ok": False, "error": "id required"})
-
-        try:
-            from agent.orchestrator import load_job
-        except Exception as e:
-            return self._json(500, {"ok": False, "error": f"agent import failed: {e}"})
-
         report = load_job(job_id)
         if not report:
-            return self._json(404, {"ok": False, "error": "job not found"})
-        return self._json(200, {"ok": True, "report": report})
+            return self._json(404, {"ok": False, "error": "job not found", "store": backend_name()})
+        return self._json(200, {"ok": True, "report": report, "store": backend_name()})
 
     def do_OPTIONS(self):
         self.send_response(204)
