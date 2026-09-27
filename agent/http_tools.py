@@ -1,10 +1,6 @@
-"""Lightweight HTTP probes that run on Vercel without VibeHacking installed.
-
-Used when VIBEHACKING_ROOT is unset so agents still produce real evidence.
-"""
+"""Lightweight HTTP probes for Vercel (no VibeHacking install required)."""
 from __future__ import annotations
 
-import json
 import ssl
 import urllib.error
 import urllib.request
@@ -12,6 +8,18 @@ from typing import Any, Dict, List, Tuple
 from urllib.parse import urljoin, urlparse
 
 UA = "VibeAgent/0.1 (+authorized-scan)"
+
+API_GUESS_PATHS = [
+    "/api", "/api/", "/api/v1", "/api/v1/", "/api/v2",
+    "/api/health", "/api/v1/health", "/health", "/healthz", "/ready", "/readyz",
+    "/status", "/api/status", "/ping", "/api/ping",
+    "/graphql", "/api/graphql", "/graphiql",
+    "/_next/data", "/.well-known/openid-configuration",
+    "/swagger", "/swagger.json", "/openapi.json", "/api/docs", "/docs", "/redoc",
+    "/v1", "/v2", "/rest", "/rpc",
+    "/api/auth", "/api/login", "/api/user", "/api/users", "/api/me",
+    "/api/config", "/api/version", "/version",
+]
 
 
 def _fetch(url: str, method: str = "GET", headers: Dict[str, str] | None = None, timeout: int = 12) -> Tuple[int, str, Dict[str, str]]:
@@ -44,9 +52,8 @@ def tool_vibe_headers(url: str) -> str:
     for h in interesting:
         if h in headers:
             lines.append(f"{h}: {headers[h]}")
-        else:
-            if h in ("content-security-policy", "x-frame-options", "strict-transport-security", "x-content-type-options"):
-                lines.append(f"MISSING: {h}  [CRITICAL]")
+        elif h in ("content-security-policy", "x-frame-options", "strict-transport-security", "x-content-type-options"):
+            lines.append(f"MISSING: {h}  [CRITICAL]")
     return "\n".join(lines)
 
 
@@ -58,7 +65,6 @@ def tool_ash(url: str) -> str:
     for h in ("server", "x-powered-by", "x-vercel-cache", "x-vercel-id"):
         if h in headers:
             lines.append(f"{h}: {headers[h]}")
-    # lightweight path probe
     base = url.rstrip("/")
     for path in ("robots.txt", "sitemap.xml", ".well-known/security.txt"):
         st, content, _ = _fetch(f"{base}/{path}")
@@ -76,9 +82,7 @@ def tool_ghost(url: str) -> str:
     lines = [f"Root status: {root_st}", f"Control status: {ctrl_st}"]
     spa = False
     if root_body and ctrl_body:
-        r = " ".join(root_body.split())[:500]
-        c = " ".join(ctrl_body.split())[:500]
-        if r == c or ("<!doctype html" in root_body[:200].lower() and root_body[:200] == ctrl_body[:200]):
+        if root_body[:200] == ctrl_body[:200] and "<!doctype html" in root_body[:200].lower():
             spa = True
             lines.append("SPA catch-all baseline active — ignoring shell clones")
     paths = [".env", ".git/HEAD", "config.json", "wp-config.php", "backup.sql"]
@@ -99,22 +103,39 @@ def tool_ghost(url: str) -> str:
 
 
 def tool_api_finder(url: str) -> str:
+    """Guess common API/health paths until real endpoints appear."""
     base = url.rstrip("/")
     root_st, root_body, _ = _fetch(base + "/")
-    lines = [f"Base: {base}"]
-    candidates = ["/api", "/api/v1", "/api/health", "/health", "/graphql", "/_next/data"]
-    for path in candidates:
-        st, body, headers = _fetch(urljoin(base + "/", path.lstrip("/")))
-        ct = headers.get("content-type", "")
+    lines = [f"Base: {base}", f"Probing {len(API_GUESS_PATHS)} common API paths…"]
+    hits: List[str] = []
+    for path in API_GUESS_PATHS:
+        target = urljoin(base + "/", path.lstrip("/"))
+        if path.endswith("/") and not target.endswith("/"):
+            target += "/"
+        st, body, headers = _fetch(target)
         if st == 0:
             continue
-        # skip SPA clone
-        if root_body and body and body[:150] == root_body[:150] and "text/html" in ct:
+        ct = headers.get("content-type", "")
+        if root_body and body and body[:120] == root_body[:120] and "text/html" in ct:
             continue
-        if "json" in ct or st in (401, 403) or (st == 200 and body and not body.lstrip().startswith("<!")):
-            lines.append(f"{path} → {st} content-type={ct[:40]}")
-    if len(lines) == 1:
-        lines.append("No obvious API endpoints confirmed")
+        interesting = (
+            "json" in ct
+            or st in (401, 403, 405, 301, 302)
+            or (
+                st == 200
+                and body
+                and not body.lstrip().lower().startswith("<!doctype")
+                and not body.lstrip().lower().startswith("<html")
+            )
+        )
+        if interesting:
+            preview = (body or "").replace("\n", " ")[:80]
+            hits.append(f"{path} → {st} ct={ct[:32]} preview={preview!r}")
+    if hits:
+        lines.append(f"Found {len(hits)} candidate endpoint(s):")
+        lines.extend(hits)
+    else:
+        lines.append("No non-SPA API endpoints confirmed from common path list")
     return "\n".join(lines)
 
 
@@ -127,11 +148,7 @@ def tool_senoria(url: str) -> str:
         ("AWS_SECRET", "AWS secret marker"),
         ("BEGIN PRIVATE KEY", "private key block"),
     ]
-    found = []
-    low = body
-    for needle, label in patterns:
-        if needle in low:
-            found.append(label)
+    found = [label for needle, label in patterns if needle in body]
     if found:
         lines.append("Markers (review manually): " + ", ".join(found))
     else:
