@@ -102,7 +102,7 @@
       <p class="hint">Type exactly: I OWN OR AM AUTHORIZED TO TEST THESE TARGETS</p>
 
       <p class="error" id="error" hidden></p>
-      <button type="submit" class="btn" id="submit">Validate &amp; queue scan</button>
+      <button type="submit" class="btn" id="submit">Validate & queue scan</button>
       <p class="success" id="success" hidden></p>
     </form>
   </div>
@@ -187,10 +187,37 @@
         note: document.getElementById("note").value.trim(),
       };
       console.log("Authorization payload", payload);
-      ok.textContent = isTrial
-        ? "Trial code accepted. Authorization OK — Hobby scan queued (client-side)."
-        : "Authorization accepted (client-side). Agent queue comes next — payload logged to console.";
+      const btn = document.getElementById("submit");
+      btn.disabled = true;
+      btn.textContent = "Running scan…";
+      ok.textContent = "Authorization OK — starting agents…";
       ok.hidden = false;
+      fetch("/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(r => r.json()).then(data => {
+        if (data.ok && data.report) {
+          sessionStorage.setItem("vibeagent_last_report", JSON.stringify(data.report));
+          const jid = data.job_id || (data.report && data.report.job_id) || "";
+          location.href = "/thread.html?job=" + encodeURIComponent(jid);
+        } else {
+          err.textContent = (data && data.error) || "Scan failed";
+          err.hidden = false;
+          ok.hidden = true;
+          btn.disabled = false;
+          btn.textContent = "Validate & queue scan";
+        }
+      }).catch(e => {
+        sessionStorage.setItem("vibeagent_last_report", JSON.stringify({
+          status: "client_only",
+          events: [{ type: "auth_ok", tier: payload.tier, trial: payload.trial, targets: payload.targets },
+                   { type: "agent_message", text: "API not reachable from this host. Deploy to Vercel or run python -m agent.cli." }],
+          report_text: null,
+          tool_calls: [],
+        }));
+        location.href = "/thread.html";
+      });
     };
   </script>
 </body>
