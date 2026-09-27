@@ -1,4 +1,4 @@
-"""POST /api/scan — start authorized scan job."""
+"""POST /api/scan — create job, run orchestrator, return job_id + report."""
 from __future__ import annotations
 
 import json
@@ -10,6 +10,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from agent.scope import Authorization, ScopeError
+from agent.orchestrator import run_job, save_job
+
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -19,12 +22,6 @@ class handler(BaseHTTPRequestHandler):
             data = json.loads(raw.decode("utf-8"))
         except json.JSONDecodeError:
             return self._json(400, {"ok": False, "error": "invalid JSON"})
-
-        try:
-            from agent.scope import Authorization, ScopeError
-            from agent.orchestrator import run_job, save_job
-        except Exception as e:
-            return self._json(500, {"ok": False, "error": f"agent import failed: {e}"})
 
         targets = data.get("targets") or []
         if isinstance(targets, str):
@@ -41,12 +38,24 @@ class handler(BaseHTTPRequestHandler):
             note=data.get("note") or None,
             access_code=data.get("access_code") or None,
         )
+        dry = bool(data.get("dry_run"))
+        model = data.get("model") or None
+        depth = (data.get("depth") or "standard").lower()
+        stress = data.get("stress_multiplier")
+        try:
+            stress = int(stress) if stress not in (None, "", 0, "0") else None
+        except (TypeError, ValueError):
+            stress = None
+        cookie = (data.get("cookie") or "").strip() or None
 
         try:
             report = run_job(
                 auth,
-                dry_run=bool(data.get("dry_run")),
-                model=data.get("model") or None,
+                dry_run=dry,
+                model=model,
+                depth=depth,
+                stress_multiplier=stress,
+                cookie=cookie,
             )
             try:
                 save_job(report)
