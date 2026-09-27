@@ -7,136 +7,141 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #050505; --elev: #0c0c0c; --border: #1a1a1a;
+      --bg: #050505; --elev: #0e0e0e; --border: #1f1f1f;
       --text: #fafafa; --muted: #a1a1aa; --accent: #22c55e;
-      --warn: #eab308; --crit: #ef4444; --info: #3b82f6;
-      --font: Inter, system-ui, sans-serif; --mono: 'JetBrains Mono', monospace;
+      --crit: #ef4444; --info: #3b82f6;
+      --font: Inter, system-ui, sans-serif; --mono: "JetBrains Mono", monospace;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
     header {
       position: sticky; top: 0; z-index: 10;
-      background: rgba(5,5,5,0.9); backdrop-filter: blur(12px);
+      background: rgba(5,5,5,0.92); backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
-      padding: 14px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      padding: 12px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     }
     header a { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
-    .job-id { font-family: var(--mono); font-size: 0.8rem; color: var(--accent); }
-    .status-pill {
-      font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+    .job-id { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); }
+    .badge {
+      font-size: 0.7rem; font-weight: 700; padding: 3px 9px; border-radius: 999px;
       background: rgba(34,197,94,0.15); color: var(--accent);
     }
-    .status-pill.running { background: rgba(59,130,246,0.15); color: var(--info); }
-    .status-pill.error { background: rgba(239,68,68,0.15); color: var(--crit); }
-    main { max-width: 720px; margin: 0 auto; padding: 24px 16px 80px; }
-    .thread { display: flex; flex-direction: column; gap: 12px; }
-    .msg {
-      border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
-      background: var(--elev); animation: fadeIn 0.25s ease;
+    .badge.running { background: rgba(59,130,246,0.15); color: var(--info); }
+    .badge.error { background: rgba(239,68,68,0.15); color: var(--crit); }
+    .badge.model { background: rgba(59,130,246,0.12); color: #93c5fd; font-family: var(--mono); font-weight: 500; }
+    main { flex: 1; max-width: 760px; width: 100%; margin: 0 auto; padding: 16px 12px 48px; display: flex; flex-direction: column; gap: 10px; }
+    .row { display: flex; gap: 10px; animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .row.system { justify-content: center; }
+    .avatar {
+      width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 800; background: #14532d; color: #bbf7d0;
     }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-    .msg .meta {
-      font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
-      margin-bottom: 6px; color: var(--muted);
+    .avatar.tool { background: #422006; color: #fde68a; }
+    .avatar.finding { background: #450a0a; color: #fecaca; }
+    .bubble {
+      max-width: min(100%, 620px); border: 1px solid var(--border); border-radius: 14px;
+      padding: 10px 14px; background: var(--elev); line-height: 1.5;
     }
-    .msg.system .meta { color: var(--info); }
-    .msg.agent .meta { color: var(--accent); }
-    .msg.tool .meta { color: var(--warn); }
-    .msg.finding .meta { color: var(--crit); }
-    .msg.pre { font-family: var(--mono); font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; color: var(--muted); max-height: 240px; overflow: auto; }
-    .msg p { font-size: 0.95rem; line-height: 1.5; white-space: pre-wrap; }
-    .empty { text-align: center; color: var(--muted); padding: 60px 20px; }
-    .report-box {
-      margin-top: 24px; border: 1px solid rgba(34,197,94,0.3); border-radius: 12px;
-      padding: 20px; background: rgba(34,197,94,0.06);
+    .row.agent .bubble { border-color: rgba(34,197,94,0.25); background: rgba(22,163,74,0.06); }
+    .row.tool .bubble { border-color: rgba(234,179,8,0.2); background: rgba(234,179,8,0.04); }
+    .row.finding .bubble { border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.06); }
+    .bubble .who { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+    .bubble .body { font-size: 0.92rem; white-space: pre-wrap; word-break: break-word; }
+    .bubble .mono { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow: auto; }
+    .sys-chip {
+      font-size: 0.75rem; color: var(--muted); background: #111; border: 1px solid var(--border);
+      border-radius: 999px; padding: 4px 12px; max-width: 100%; word-break: break-word;
     }
-    .report-box h2 { font-size: 1rem; margin-bottom: 12px; }
-    .report-box pre { font-family: var(--mono); font-size: 0.85rem; white-space: pre-wrap; line-height: 1.5; }
+    .empty { text-align: center; color: var(--muted); padding: 48px 16px; }
   </style>
 </head>
 <body>
   <header>
     <a href="/">← VibeAgent</a>
     <span class="job-id" id="job-label">job —</span>
-    <span class="status-pill running" id="status">loading</span>
+    <span class="badge running" id="status">loading</span>
+    <span class="badge model" id="model-badge" hidden></span>
   </header>
-  <main>
-    <div class="thread" id="thread"></div>
-    <div class="empty" id="empty">Waiting for events…</div>
-    <div class="report-box" id="report" hidden>
-      <h2>Final report</h2>
-      <pre id="report-text"></pre>
-    </div>
+  <main id="chat">
+    <div class="empty" id="empty">Waiting for agent…</div>
   </main>
   <script>
     const params = new URLSearchParams(location.search);
     const jobId = params.get('job') || params.get('id') || '';
-    const thread = document.getElementById('thread');
+    const chat = document.getElementById('chat');
     const empty = document.getElementById('empty');
     const statusEl = document.getElementById('status');
-    const jobLabel = document.getElementById('job-label');
-    jobLabel.textContent = jobId ? 'job ' + jobId : 'no job id';
+    const modelBadge = document.getElementById('model-badge');
+    document.getElementById('job-label').textContent = jobId ? 'job ' + jobId : 'session';
     const seen = new Set();
 
-    function addMsg(cls, meta, body, isPre) {
-      const key = cls + '|' + meta + '|' + (body || '').slice(0, 120);
+    function row(kind, who, bodyHtml, isMono) {
+      const key = kind + '|' + who + '|' + (bodyHtml || '').slice(0, 100);
       if (seen.has(key)) return;
       seen.add(key);
       empty.hidden = true;
-      const div = document.createElement('div');
-      div.className = 'msg ' + cls;
-      div.innerHTML = '<div class="meta">' + meta + '</div>';
-      if (isPre) {
-        const pre = document.createElement('div');
-        pre.className = 'pre';
-        pre.textContent = body || '';
-        div.appendChild(pre);
+      const wrap = document.createElement('div');
+      wrap.className = 'row ' + kind;
+      if (kind === 'system') {
+        wrap.innerHTML = '<div class="sys-chip"></div>';
+        wrap.querySelector('.sys-chip').textContent = bodyHtml;
       } else {
-        const p = document.createElement('p');
-        p.textContent = body || '';
-        div.appendChild(p);
+        const av = document.createElement('div');
+        av.className = 'avatar ' + kind;
+        av.textContent = kind === 'agent' ? 'VA' : kind === 'tool' ? '⚙' : '!';
+        const bub = document.createElement('div');
+        bub.className = 'bubble';
+        const w = document.createElement('div');
+        w.className = 'who';
+        w.textContent = who;
+        const b = document.createElement('div');
+        b.className = isMono ? 'mono' : 'body';
+        b.textContent = bodyHtml;
+        bub.appendChild(w);
+        bub.appendChild(b);
+        wrap.appendChild(av);
+        wrap.appendChild(bub);
       }
-      thread.appendChild(div);
+      chat.appendChild(wrap);
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    function setModel(model, provider, effort) {
+      if (!model) return;
+      modelBadge.hidden = false;
+      modelBadge.textContent = (provider ? provider + ' · ' : '') + model + (effort && effort !== 'none' ? ' · reason:' + effort : ' · reason:off');
     }
 
     function renderReport(report) {
       if (!report) return false;
       statusEl.textContent = report.status || 'completed';
-      statusEl.className = 'status-pill' + (
-        report.status === 'running' ? ' running' :
-        (report.status === 'completed' || report.status === 'dry_run_ok' ? '' : ' error')
-      );
-      const events = report.events || [];
-      for (const ev of events) {
+      statusEl.className = 'badge' + (report.status === 'running' ? ' running' : (report.status === 'completed' || report.status === 'dry_run_ok' ? '' : ' error'));
+      setModel(report.model, report.provider, report.reasoning_effort);
+
+      for (const ev of report.events || []) {
         const t = ev.type;
-        if (t === 'auth_ok') addMsg('system', 'system', 'Authorization accepted · ' + (ev.tier || '') + (ev.trial ? ' · trial' : '') + '\nTargets: ' + JSON.stringify(ev.targets));
-        else if (t === 'round') addMsg('system', 'round ' + ev.index + '/' + ev.max, 'Agent turn');
-        else if (t === 'agent_message') addMsg('agent', 'agent', ev.text);
-        else if (t === 'tool_start') addMsg('tool', 'tool → ' + ev.tool, JSON.stringify(ev.args || {}), true);
-        else if (t === 'tool_result') addMsg('tool', 'tool ← ' + ev.tool + (ev.ok ? ' ok' : ' fail'), ev.preview, true);
-        else if (t === 'finding') addMsg('finding', 'finding · ' + (ev.severity || ''), ev.detail);
-        else if (t === 'error') addMsg('finding', 'error', ev.text);
-        else if (t === 'done') {
-          statusEl.textContent = ev.status || report.status || 'done';
-        }
+        if (t === 'auth_ok') row('system', '', 'Authorized · ' + (ev.tier || '') + (ev.trial ? ' · trial' : '') + ' · ' + JSON.stringify(ev.targets));
+        else if (t === 'model_info') setModel(ev.model, ev.provider, ev.reasoning_effort);
+        else if (t === 'round') row('system', '', 'Round ' + ev.index + '/' + ev.max);
+        else if (t === 'agent_message') row('agent', 'VibeAgent', ev.text || '');
+        else if (t === 'reasoning') row('agent', 'reasoning', ev.text || '', true);
+        else if (t === 'tool_start') row('tool', 'tool → ' + ev.tool, JSON.stringify(ev.args || {}, null, 2), true);
+        else if (t === 'tool_result') row('tool', 'tool ← ' + ev.tool + (ev.ok ? ' · ok' : ' · fail'), ev.preview || '', true);
+        else if (t === 'finding') row('finding', 'finding · ' + (ev.severity || ''), ev.detail || '');
+        else if (t === 'error') row('finding', 'error', ev.text || '');
+        else if (t === 'done') statusEl.textContent = ev.status || report.status || 'done';
       }
-      // Fallback: synthesize from tool_calls if no events rendered
-      if (seen.size === 0 && report.tool_calls) {
+
+      if (seen.size <= 1 && report.tool_calls) {
         for (const tc of report.tool_calls) {
-          addMsg('tool', 'tool → ' + tc.tool, JSON.stringify(tc.args || {}), true);
+          row('tool', 'tool → ' + tc.tool, JSON.stringify(tc.args || {}), true);
           const out = (tc.result && (tc.result.stdout || tc.result.message)) || tc.blocked || '';
-          addMsg('tool', 'tool ← ' + tc.tool, String(out).slice(0, 2500), true);
+          row('tool', 'tool ← ' + tc.tool, String(out).slice(0, 3000), true);
         }
       }
-      if (report.report_text) {
-        document.getElementById('report').hidden = false;
-        document.getElementById('report-text').textContent = report.report_text;
-      }
-      if (report.findings && report.findings.length) {
-        for (const f of report.findings) {
-          addMsg('finding', 'finding · ' + (f.severity || 'info'), f.detail || JSON.stringify(f));
-        }
-      }
+      if (report.report_text) row('agent', 'VibeAgent · final report', report.report_text);
       return true;
     }
 
@@ -145,31 +150,25 @@
         const raw = sessionStorage.getItem('vibeagent_last_report');
         if (!raw) return null;
         const report = JSON.parse(raw);
-        // If URL has a job id, accept session report only if it matches (or no job_id on report)
         if (jobId && report.job_id && report.job_id !== jobId) return null;
         return report;
       } catch { return null; }
     }
 
     async function poll() {
-      // 1) Prefer sessionStorage (scan response) — works on serverless without shared disk
       const local = loadFromSession();
       if (local) {
         renderReport(local);
-        empty.hidden = true;
         if (local.status !== 'running') return;
       }
-
       if (!jobId) {
         if (!local) {
           statusEl.textContent = 'no job';
-          statusEl.className = 'status-pill error';
+          statusEl.className = 'badge error';
           empty.textContent = 'No job data. Start a scan from /scan.html';
         }
         return;
       }
-
-      // 2) Optional API poll (only works if durable store is configured)
       try {
         const res = await fetch('/api/job?id=' + encodeURIComponent(jobId));
         const data = await res.json();
@@ -177,15 +176,8 @@
           sessionStorage.setItem('vibeagent_last_report', JSON.stringify(data.report));
           renderReport(data.report);
           if (data.report.status === 'running') setTimeout(poll, 1500);
-          return;
         }
       } catch (e) {}
-
-      if (!local) {
-        statusEl.textContent = 'missing';
-        statusEl.className = 'status-pill error';
-        empty.textContent = 'Job not found on server (serverless storage is ephemeral). Re-run the scan — results are shown from this browser session.';
-      }
     }
     poll();
   </script>
