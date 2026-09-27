@@ -97,12 +97,33 @@
       <label for="note">Optional note</label>
       <input id="note" name="note" placeholder="I built this / I own this domain" />
 
+      <label for="depth">Depth</label>
+      <select id="depth" name="depth">
+        <option value="quick">Quick — ~4 rounds</option>
+        <option value="standard" selected>Standard — 12 rounds (default)</option>
+        <option value="deep">Deep — 15 rounds, more paths</option>
+      </select>
+      <p class="hint">Standard/Deep force api_finder + follow-ups and always produce ## Findings.</p>
+
+      <label for="stress">Authorized stress (Enterprise or trial code only)</label>
+      <select id="stress" name="stress">
+        <option value="">Off</option>
+        <option value="5">x5 — light sample</option>
+        <option value="10">x10 — moderate sample</option>
+        <option value="20">x20 — heavier sample (capped)</option>
+      </select>
+      <p class="hint">Capped duration/concurrency. Not a flood tool. Scope-locked only.</p>
+
+      <label for="cookie">Optional Cookie (owned zones behind Cloudflare)</label>
+      <input id="cookie" name="cookie" placeholder="cf_clearance=…; session=…" autocomplete="off" />
+      <p class="hint">Paste cookies from YOUR browser for assets you own. We do not bypass robot checks.</p>
+
       <label for="confirm">Confirmation phrase</label>
       <input id="confirm" name="confirm" placeholder="I OWN OR AM AUTHORIZED TO TEST THESE TARGETS" required autocomplete="off" />
       <p class="hint">Type exactly: I OWN OR AM AUTHORIZED TO TEST THESE TARGETS</p>
 
       <p class="error" id="error" hidden></p>
-      <button type="submit" class="btn" id="submit">Validate & queue scan</button>
+      <button type="submit" class="btn" id="submit">Validate &amp; queue scan</button>
       <p class="success" id="success" hidden></p>
     </form>
   </div>
@@ -174,6 +195,7 @@
         }
       }
 
+      const stressVal = document.getElementById("stress").value;
       const payload = {
         tier: effectiveTier,
         targets,
@@ -185,7 +207,15 @@
         contact_email: document.getElementById("contact_email").value.trim(),
         emergency_contact: document.getElementById("emergency_contact").value.trim(),
         note: document.getElementById("note").value.trim(),
+        depth: document.getElementById("depth").value || "standard",
+        stress_multiplier: stressVal ? parseInt(stressVal, 10) : null,
+        cookie: document.getElementById("cookie").value.trim() || null,
       };
+      if (payload.stress_multiplier && !(isTrial || effectiveTier === "enterprise")) {
+        err.textContent = "Stress requires Enterprise tier or a valid trial access code.";
+        err.hidden = false;
+        return;
+      }
       console.log("Authorization payload", payload);
       const btn = document.getElementById("submit");
       btn.disabled = true;
