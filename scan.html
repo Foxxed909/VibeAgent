@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Start a scan — VibeAgent</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     :root {
@@ -25,7 +24,6 @@
       border-radius: 8px; padding: 12px 14px; color: var(--text); font-size: 0.95rem;
       font-family: inherit; margin-bottom: 18px;
     }
-    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
     textarea { min-height: 100px; font-family: var(--mono); font-size: 0.85rem; }
     .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: -12px; margin-bottom: 18px; }
     .btn {
@@ -33,16 +31,13 @@
       padding: 14px; border-radius: 8px; font-weight: 700; font-size: 0.95rem;
       background: var(--accent); color: #000; border: none; cursor: pointer;
     }
-    .btn:hover { background: #16a34a; }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .tier-toggle { display: flex; gap: 8px; margin-bottom: 24px; }
     .tier-toggle button {
       flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border);
       background: transparent; color: var(--text-muted); font-weight: 600; cursor: pointer;
     }
-    .tier-toggle button.active {
-      border-color: var(--accent); color: var(--accent); background: var(--accent-dim);
-    }
+    .tier-toggle button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
     .enterprise-only { display: none; }
     .error { color: var(--danger); font-size: 0.9rem; margin-bottom: 12px; }
     .success { color: var(--accent); font-size: 0.9rem; margin-top: 16px; }
@@ -52,17 +47,18 @@
       border-radius: 8px; padding: 14px 16px; margin-bottom: 24px; font-size: 0.9rem;
     }
     .trial-box code { font-family: var(--mono); font-size: 0.8rem; word-break: break-all; }
+    .check { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 18px; font-size: 0.85rem; color: var(--text-muted); }
+    .check input { width: auto; margin: 4px 0 0; }
   </style>
 </head>
 <body>
   <div class="container">
     <a class="back" href="/">← VibeAgent</a>
     <h1>Start a scan</h1>
-    <p class="sub">Exact targets only. Type the confirmation phrase to proceed.</p>
+    <p class="sub">Exact targets only. Live agent stream opens as soon as you launch.</p>
 
     <div class="trial-box">
       <strong>Trial / friends access</strong><br/>
-      Enter the access code below to try Hobby scans free.<br/>
       Code: <code>9954FA-67£54CD-GROKJAILEDBROKE£D</code>
     </div>
 
@@ -72,9 +68,8 @@
     </div>
 
     <form id="scan-form">
-      <label for="access_code">Access code (optional — trial / friends)</label>
+      <label for="access_code">Access code (optional)</label>
       <input id="access_code" name="access_code" placeholder="9954FA-67£54CD-GROKJAILEDBROKE£D" autocomplete="off" />
-      <p class="hint">Leave blank if paying. Valid trial code unlocks Hobby without payment.</p>
 
       <div id="hobby-fields">
         <label for="app_name">App / project name</label>
@@ -85,45 +80,49 @@
         <label for="company_name">Company / legal name</label>
         <input id="company_name" name="company_name" placeholder="MiniCloud Inc." />
         <label for="contact_email">Contact email</label>
-        <input id="contact_email" name="contact_email" type="email" placeholder="security@company.com" />
+        <input id="contact_email" name="contact_email" type="email" />
         <label for="emergency_contact">Emergency stop contact</label>
-        <input id="emergency_contact" name="emergency_contact" placeholder="Name + phone or email" />
+        <input id="emergency_contact" name="emergency_contact" />
       </div>
 
       <label for="targets">Exact targets (one per line)</label>
-      <textarea id="targets" name="targets" placeholder="https://my-app.vercel.app&#10;https://staging.my-app.vercel.app" required></textarea>
-      <p class="hint" id="target-hint">Hobby: exact URLs/hosts and *.vercel.app only. No other wildcards.</p>
-
-      <label for="note">Optional note</label>
-      <input id="note" name="note" placeholder="I built this / I own this domain" />
+      <textarea id="targets" name="targets" required placeholder="https://my-app.vercel.app"></textarea>
+      <p class="hint" id="target-hint">Hobby: exact URLs/hosts and *.vercel.app only.</p>
 
       <label for="depth">Depth</label>
       <select id="depth" name="depth">
         <option value="quick">Quick — ~4 rounds</option>
-        <option value="standard" selected>Standard — 12 rounds (default)</option>
-        <option value="deep">Deep — 15 rounds, more paths</option>
+        <option value="standard" selected>Standard — 12 rounds</option>
+        <option value="deep" id="depth-deep">Deep — 15 rounds (Enterprise / trial)</option>
       </select>
-      <p class="hint">Standard/Deep force api_finder + follow-ups and always produce ## Findings.</p>
+      <p class="hint">Hobby without trial code: Quick + Standard only.</p>
 
-      <label for="stress">Authorized stress (Enterprise or trial code only)</label>
+      <label for="stress">Authorized stress</label>
       <select id="stress" name="stress">
         <option value="">Off</option>
-        <option value="5">x5 — light sample</option>
-        <option value="10">x10 — moderate sample</option>
-        <option value="20">x20 — heavier sample (capped)</option>
+        <option value="5">x5</option>
+        <option value="10">x10</option>
+        <option value="20">x20</option>
+        <option value="50" id="stress-50" disabled>x50 (Enterprise org-managed)</option>
       </select>
-      <p class="hint">Capped duration/concurrency. Not a flood tool. Scope-locked only.</p>
+      <p class="hint">Requires Enterprise or trial code. Default mode is platform-capped.</p>
 
-      <label for="cookie">Optional Cookie (owned zones behind Cloudflare)</label>
-      <input id="cookie" name="cookie" placeholder="cf_clearance=…; session=…" autocomplete="off" />
-      <p class="hint">Paste cookies from YOUR browser for assets you own. We do not bypass robot checks.</p>
+      <div id="stress-mode-wrap" class="enterprise-only">
+        <label class="check">
+          <input type="checkbox" id="stress_org" />
+          <span><strong>Org-managed limits</strong> — Enterprise chooses higher ceilings (x50, longer sample). You accept operational risk on your targets. Platform still has a finite runtime ceiling.</span>
+        </label>
+      </div>
+
+      <label for="cookie">Optional Cookie (owned Cloudflare zones)</label>
+      <input id="cookie" name="cookie" placeholder="cf_clearance=…" autocomplete="off" />
+      <p class="hint">We do not bypass robot checks. Allowlist or paste your own cookie.</p>
 
       <label for="confirm">Confirmation phrase</label>
-      <input id="confirm" name="confirm" placeholder="I OWN OR AM AUTHORIZED TO TEST THESE TARGETS" required autocomplete="off" />
-      <p class="hint">Type exactly: I OWN OR AM AUTHORIZED TO TEST THESE TARGETS</p>
+      <input id="confirm" name="confirm" required autocomplete="off" placeholder="I OWN OR AM AUTHORIZED TO TEST THESE TARGETS" />
 
       <p class="error" id="error" hidden></p>
-      <button type="submit" class="btn" id="submit">Validate &amp; queue scan</button>
+      <button type="submit" class="btn" id="submit">Launch agent (live)</button>
       <p class="success" id="success" hidden></p>
     </form>
   </div>
@@ -134,21 +133,21 @@
     let tier = "hobby";
     const hobbyBtn = document.querySelector('[data-tier="hobby"]');
     const entBtn = document.querySelector('[data-tier="enterprise"]');
-    const hobbyFields = document.getElementById("hobby-fields");
-    const entFields = document.getElementById("enterprise-fields");
-    const hint = document.getElementById("target-hint");
 
     function setTier(t) {
       tier = t;
       hobbyBtn.classList.toggle("active", t === "hobby");
       entBtn.classList.toggle("active", t === "enterprise");
-      hobbyFields.style.display = t === "hobby" ? "block" : "none";
-      entFields.style.display = t === "enterprise" ? "block" : "none";
+      document.getElementById("hobby-fields").style.display = t === "hobby" ? "block" : "none";
+      document.querySelectorAll(".enterprise-only").forEach(el => {
+        el.style.display = t === "enterprise" ? "block" : "none";
+      });
       document.getElementById("app_name").required = t === "hobby";
       document.getElementById("company_name").required = t === "enterprise";
-      hint.textContent = t === "hobby"
-        ? "Hobby: exact URLs/hosts and *.vercel.app only. No other wildcards."
-        : "Enterprise: exact hosts, URLs, and IP/CIDR ranges. No wildcards.";
+      document.getElementById("stress-50").disabled = t !== "enterprise";
+      document.getElementById("target-hint").textContent = t === "hobby"
+        ? "Hobby: exact URLs/hosts and *.vercel.app only."
+        : "Enterprise: exact hosts, URLs, IP/CIDR. Org can raise stress ceilings.";
     }
     hobbyBtn.onclick = () => setTier("hobby");
     entBtn.onclick = () => setTier("enterprise");
@@ -162,40 +161,23 @@
       const accessCode = document.getElementById("access_code").value.trim();
       const isTrial = accessCode === TRIAL_CODE;
       if (accessCode && !isTrial) {
-        err.textContent = "Invalid access code.";
-        err.hidden = false;
-        return;
+        err.textContent = "Invalid access code."; err.hidden = false; return;
       }
-
       const confirm = document.getElementById("confirm").value.trim();
       if (confirm !== CONFIRM) {
-        err.textContent = "Confirmation phrase does not match. Scan refused.";
-        err.hidden = false;
-        return;
+        err.textContent = "Confirmation phrase does not match."; err.hidden = false; return;
       }
-      const targets = document.getElementById("targets").value
-        .split("\n").map(s => s.trim()).filter(Boolean);
-      if (!targets.length) {
-        err.textContent = "Add at least one exact target.";
-        err.hidden = false;
-        return;
-      }
+      const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
+      if (!targets.length) { err.textContent = "Add at least one target."; err.hidden = false; return; }
 
       const effectiveTier = isTrial ? "hobby" : tier;
-      if (effectiveTier === "hobby") {
-        for (const t of targets) {
-          const low = t.toLowerCase();
-          const vercelOk = low === "*.vercel.app" || (low.endsWith(".vercel.app") && !low.includes("*"));
-          const exact = !low.includes("*") && !low.includes("?");
-          if (!vercelOk && !exact) {
-            err.textContent = "Hobby rejects this target: " + t;
-            err.hidden = false;
-            return;
-          }
-        }
+      let depth = document.getElementById("depth").value || "standard";
+      if (effectiveTier === "hobby" && !isTrial && depth === "deep") {
+        depth = "standard";
       }
 
       const stressVal = document.getElementById("stress").value;
+      const stressOrg = document.getElementById("stress_org").checked && effectiveTier === "enterprise";
       const payload = {
         tier: effectiveTier,
         targets,
@@ -206,48 +188,24 @@
         company_name: document.getElementById("company_name").value.trim(),
         contact_email: document.getElementById("contact_email").value.trim(),
         emergency_contact: document.getElementById("emergency_contact").value.trim(),
-        note: document.getElementById("note").value.trim(),
-        depth: document.getElementById("depth").value || "standard",
+        depth,
         stress_multiplier: stressVal ? parseInt(stressVal, 10) : null,
+        stress_mode: stressOrg ? "org" : "capped",
         cookie: document.getElementById("cookie").value.trim() || null,
       };
       if (payload.stress_multiplier && !(isTrial || effectiveTier === "enterprise")) {
-        err.textContent = "Stress requires Enterprise tier or a valid trial access code.";
-        err.hidden = false;
-        return;
+        err.textContent = "Stress requires Enterprise or trial code."; err.hidden = false; return;
       }
-      console.log("Authorization payload", payload);
+
       const btn = document.getElementById("submit");
       btn.disabled = true;
-      btn.textContent = "Running scan…";
-      ok.textContent = "Authorization OK — starting agents…";
+      btn.textContent = "Streaming…";
+      ok.textContent = "Opening live thread…";
       ok.hidden = false;
-      fetch("/api/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then(r => r.json()).then(data => {
-        if (data.ok && data.report) {
-          sessionStorage.setItem("vibeagent_last_report", JSON.stringify(data.report));
-          const jid = data.job_id || (data.report && data.report.job_id) || "";
-          location.href = "/thread.html?job=" + encodeURIComponent(jid);
-        } else {
-          err.textContent = (data && data.error) || "Scan failed";
-          err.hidden = false;
-          ok.hidden = true;
-          btn.disabled = false;
-          btn.textContent = "Validate & queue scan";
-        }
-      }).catch(e => {
-        sessionStorage.setItem("vibeagent_last_report", JSON.stringify({
-          status: "client_only",
-          events: [{ type: "auth_ok", tier: payload.tier, trial: payload.trial, targets: payload.targets },
-                   { type: "agent_message", text: "API not reachable from this host. Deploy to Vercel or run python -m agent.cli." }],
-          report_text: null,
-          tool_calls: [],
-        }));
-        location.href = "/thread.html";
-      });
+
+      // Store payload so thread can start SSE
+      sessionStorage.setItem("vibeagent_pending_scan", JSON.stringify(payload));
+      location.href = "/thread.html?live=1";
     };
   </script>
 </body>
