@@ -1,6 +1,9 @@
 """OpenAI API client for GPT-6 Luna / GPT-5.6 Luna.
 
 Set OPENAI_API_KEY in the environment. Default model: gpt-6-luna (cost-efficient).
+
+Note: Chat Completions + function tools on Luna requires reasoning_effort=none.
+Use /v1/responses for reasoning+tools together later if needed.
 """
 from __future__ import annotations
 
@@ -11,7 +14,6 @@ from typing import Any, Dict, List, Optional
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
-# Preferred models for VibeAgent (budget-aware)
 MODEL_GPT6_LUNA = "gpt-6-luna"
 MODEL_GPT56_LUNA = "gpt-5.6-luna"
 DEFAULT_MODEL = MODEL_GPT6_LUNA
@@ -39,15 +41,15 @@ def chat(
         "model": model,
         "messages": messages,
         "temperature": temperature,
-        "max_tokens": max_tokens,
+        "max_completion_tokens": max_tokens,
     }
-    # reasoning.effort for Luna-family when supported
-    if reasoning_effort and reasoning_effort != "none":
-        body["reasoning_effort"] = reasoning_effort
-
+    # Chat Completions + function tools requires reasoning_effort=none on Luna
     if tools:
         body["tools"] = tools
         body["tool_choice"] = "auto"
+        body["reasoning_effort"] = "none"
+    elif reasoning_effort:
+        body["reasoning_effort"] = reasoning_effort
 
     req = urllib.request.Request(
         OPENAI_URL,
@@ -63,18 +65,4 @@ def chat(
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
-        # Retry without reasoning_effort if model rejects it
-        if e.code == 400 and "reasoning" in detail.lower() and "reasoning_effort" in body:
-            body.pop("reasoning_effort", None)
-            req2 = urllib.request.Request(
-                OPENAI_URL,
-                data=json.dumps(body).encode("utf-8"),
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json",
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(req2, timeout=120) as resp:
-                return json.loads(resp.read().decode("utf-8"))
         raise OpenAIError(f"OpenAI HTTP {e.code}: {detail}") from e
