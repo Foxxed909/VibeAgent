@@ -10,8 +10,9 @@
     }
   },
   "rewrites": [
-    { "source": "/api/scan", "destination": "/api/index" },
-    { "source": "/api/job", "destination": "/api/index" },
-    { "source": "/api/waitlist", "destination": "/api/index" }
+    { "source": "/api/scan", "destination": "/api/index?route=scan" },
+    { "source": "/api/job", "destination": "/api/index?route=job" },
+    { "source": "/api/waitlist", "destination": "/api/index?route=waitlist" },
+    { "source": "/api", "destination": "/api/index" }
   ]
 }

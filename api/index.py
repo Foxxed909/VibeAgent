@@ -1,19 +1,16 @@
-"""Single Vercel Python entrypoint (ASGI).
+"""Vercel Python function for /api/* only (ASGI).
 
-Routes:
-  POST /api/scan
-  GET  /api/job?id=
-  POST /api/waitlist
+Static pages (index.html, scan.html, thread.html) are served by Vercel CDN.
+This app must NOT be the project-wide entrypoint.
 """
 from __future__ import annotations
 
 import json
 import os
 import sys
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 from urllib.parse import parse_qs
 
-# Repo root on path so `agent` imports resolve in the serverless bundle
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -46,28 +43,6 @@ def _options() -> Dict[str, Any]:
     }
 
 
-def _read_body(receive) -> bytes:
-    import asyncio
-
-    async def _collect() -> bytes:
-        chunks = []
-        while True:
-            message = await receive()
-            if message["type"] != "http.request":
-                break
-            chunks.append(message.get("body", b""))
-            if not message.get("more_body"):
-                break
-        return b"".join(chunks)
-
-    # Starlette-style: receive is async
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        # We're inside an async app — body already collected by caller
-        return b""
-    return loop.run_until_complete(_collect())
-
-
 async def _body(receive) -> bytes:
     chunks = []
     while True:
@@ -81,13 +56,7 @@ async def _body(receive) -> bytes:
 
 
 async def _send_response(send, status: int, headers: List, body: bytes) -> None:
-    await send(
-        {
-            "type": "http.response.start",
-            "status": status,
-            "headers": headers,
-        }
-    )
+    await send({"type": "http.response.start", "status": status, "headers": headers})
     await send({"type": "http.response.body", "body": body})
 
 
@@ -156,13 +125,11 @@ def _handle_job(qs: dict) -> Tuple[int, dict]:
 
 
 async def app(scope: dict, receive, send) -> None:
-    """ASGI application — Vercel Python entrypoint."""
     if scope["type"] != "http":
         return
 
     method = scope.get("method", "GET").upper()
     path = scope.get("path", "") or ""
-    # Normalize: rewrites may land on /api/index
     raw_qs = scope.get("query_string", b"").decode("utf-8", errors="replace")
     qs = parse_qs(raw_qs)
 
@@ -171,19 +138,13 @@ async def app(scope: dict, receive, send) -> None:
         await _send_response(send, r["status"], r["headers"], r["body"])
         return
 
-    # Route matching (supports rewrite destinations)
-    is_scan = path.endswith("/scan") or path.rstrip("/").endswith("/api/scan")
-    is_job = path.endswith("/job") or path.rstrip("/").endswith("/api/job")
-    is_waitlist = path.endswith("/waitlist") or path.rstrip("/").endswith("/api/waitlist")
+    route = (qs.get("route") or [""])[0].lower()
+    path_l = path.lower().rstrip("/")
 
-    # Also accept path on /api/index with ?route= or header — primary is rewrite
-    route = (qs.get("route") or [""])[0]
-    if route == "scan":
-        is_scan = True
-    elif route == "job":
-        is_job = True
-    elif route == "waitlist":
-        is_waitlist = True
+    is_scan = route == "scan" or path_l.endswith("/scan") or "/api/scan" in path_l
+    is_job = route == "job" or path_l.endswith("/job") or "/api/job" in path_l
+    is_waitlist = route == "waitlist" or path_l.endswith("/waitlist") or "/api/waitlist" in path_l
+    is_api_root = path_l in ("/api", "/api/index") or path_l.endswith("/api/index")
 
     status, body = 404, {"ok": False, "error": f"not found: {path}"}
 
@@ -204,7 +165,7 @@ async def app(scope: dict, receive, send) -> None:
             status, body = _handle_scan(data)
         elif is_job and method == "GET":
             status, body = _handle_job(qs)
-        elif method == "GET" and (path in ("/api", "/api/", "/api/index", "/api/index/")):
+        elif method == "GET" and is_api_root:
             status, body = 200, {
                 "ok": True,
                 "service": "VibeAgent",
@@ -215,7 +176,3 @@ async def app(scope: dict, receive, send) -> None:
 
     r = _json_response(status, body)
     await _send_response(send, r["status"], r["headers"], r["body"])
-
-
-# Vercel looks for `app` (ASGI) or `handler` (BaseHTTPRequestHandler)
-# Prefer ASGI `app` as the official entrypoint.
