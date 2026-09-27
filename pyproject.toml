@@ -1,9 +1,0 @@
-[project]
-name = "vibeagent"
-version = "0.1.0"
-description = "Authorized security testing agents"
-requires-python = ">=3.10"
-
-# Do NOT set tool.vercel.entrypoint here — that makes Python handle every
-# request (including /) and breaks static index.html / scan.html.
-# api/index.py is a file-based function under /api only.
