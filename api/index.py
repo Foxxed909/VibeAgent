@@ -1,4 +1,4 @@
-"""GET /api — health + route list. Classic Vercel Python handler."""
+"""GET /api — health + route list."""
 from http.server import BaseHTTPRequestHandler
 import json
 
@@ -11,9 +11,11 @@ class handler(BaseHTTPRequestHandler):
             "routes": [
                 "GET  /api",
                 "POST /api/scan",
+                "POST /api/stream  (SSE live events)",
                 "GET  /api/job?id=",
                 "POST /api/waitlist",
             ],
+            "job_store": "Set KV_REST_API_URL + KV_REST_API_TOKEN for durable jobs",
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -25,7 +27,7 @@ class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
