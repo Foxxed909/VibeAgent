@@ -285,33 +285,28 @@ def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile) -> None
 
 
 def _parse_api_hits(base: str, stdout: str) -> List[str]:
-    hits = []
+    """Extract in-scope follow-up URLs from api_finder output.
+
+    api_finder prints one candidate per line as ``/path -> <status> ...`` using
+    a unicode arrow (U+2192); ``->`` is accepted as a fallback. Challenge lines
+    are skipped -- a challenge is not a discovered endpoint.
+    """
+    arrows = ("\u2192", "->")
+    hits: List[str] = []
+    base_prefix = base.rstrip("/") + "/"
     for line in (stdout or "").splitlines():
-        if "\u2192" not in line and "\u2192" not in line and "\u2192" not in line:
-            if "\u2192" not in line and "->" not in line and "\u2192" not in line:
-                # support both arrow forms
-                if "\u2192" not in line and "\u2192" not in line:
-                    pass
-        arrow = "\u2192" if "\u2192" in line else ("->" if "->" in line else None)
-        # Prefer unicode arrow used in http_tools
-        if "\u2192" in line:
-            arrow = "\u2192"
-        elif "\u2192" in line:
-            arrow = "\u2192"
-        elif "->" in line:
-            arrow = "->"
-        else:
-            # actual character →
-            if "\u2192" in line or chr(0x2192) in line:
-                arrow = chr(0x2192)
-            else:
-                continue
         if "CHALLENGE" in line:
             continue
-        path = line.split(arrow)[0].strip().split()[0]
+        arrow = next((a for a in arrows if a in line), None)
+        if arrow is None:
+            continue
+        head = line.split(arrow, 1)[0].strip().split()
+        if not head:
+            continue
+        path = head[0]
         if not path.startswith("/"):
             continue
-        hits.append(urljoin(base.rstrip("/") + "/", path.lstrip("/")))
+        hits.append(urljoin(base_prefix, path.lstrip("/")))
     return hits[:12]
 
 

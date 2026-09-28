@@ -7,7 +7,9 @@ Trial access code unlocks Hobby scans without payment (friends + owner).
 """
 from __future__ import annotations
 
+import hmac
 import ipaddress
+import os
 import re
 from dataclasses import dataclass
 from typing import List, Optional
@@ -16,8 +18,13 @@ from urllib.parse import urlparse
 CONFIRM_PHRASE = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS"
 
 # Trial / friend access code — grants Hobby tier without payment.
-# Keep in sync with scan.html
-TRIAL_ACCESS_CODE = "9954FA-67£54CD-GROKJAILEDBROKE£D"
+#
+# SECURITY: the code is a server-side secret. Set VIBEAGENT_TRIAL_CODE in the
+# deployment environment (Vercel → Project → Settings → Environment Variables).
+# When it is unset, trial access is simply disabled — we never ship a working
+# code in source or render it in the client, so it cannot leak from the repo or
+# the browser.
+TRIAL_ACCESS_CODE = os.environ.get("VIBEAGENT_TRIAL_CODE", "").strip()
 
 
 @dataclass
@@ -69,9 +76,11 @@ class ScopeError(ValueError):
 
 
 def is_valid_trial_code(code: Optional[str]) -> bool:
-    if not code:
+    # No configured code ⇒ trials disabled. Never treat an empty secret as valid.
+    if not code or not TRIAL_ACCESS_CODE:
         return False
-    return code.strip() == TRIAL_ACCESS_CODE
+    # Constant-time compare avoids leaking the code length/prefix via timing.
+    return hmac.compare_digest(code.strip(), TRIAL_ACCESS_CODE)
 
 
 def normalize_target(raw: str) -> str:

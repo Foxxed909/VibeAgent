@@ -2,255 +2,247 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Scan thread — VibeAgent</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <meta name="description" content="Live agent transcript — tool calls, findings, and the final report as they stream." />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/theme.css" />
   <style>
-    :root {
-      --bg: #050505; --elev: #0e0e0e; --border: #1f1f1f;
-      --text: #fafafa; --muted: #a1a1aa; --accent: #22c55e;
-      --crit: #ef4444; --info: #3b82f6;
-      --font: Inter, system-ui, sans-serif; --mono: "JetBrains Mono", monospace;
+    html, body { height: 100%; }
+    body { display: flex; flex-direction: column; }
+    .thread-head {
+      position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+      background: color-mix(in srgb, var(--paper) 85%, transparent); backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--line); padding: 12px var(--gutter);
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
-    header {
-      position: sticky; top: 0; z-index: 10;
-      background: rgba(5,5,5,0.92); backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
-      padding: 12px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    .thread-head a.back { color: var(--ink-soft); font-family: var(--font-mono); font-size: 0.84rem; }
+    .thread-head a.back:hover { color: var(--brand); }
+    .job-id { font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-faint); }
+    .status {
+      font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
+      padding: 4px 11px; border-radius: var(--radius-pill); text-transform: uppercase;
+      display: inline-flex; align-items: center; gap: 7px;
+      background: var(--brand-tint); color: var(--brand);
     }
-    header a { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
-    .job-id { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); }
-    .badge { font-size: 0.7rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: rgba(34,197,94,0.15); color: var(--accent); }
-    .badge.running { background: rgba(59,130,246,0.15); color: var(--info); }
-    .badge.error { background: rgba(239,68,68,0.15); color: var(--crit); }
-    .badge.model { background: rgba(59,130,246,0.12); color: #93c5fd; font-family: var(--mono); font-weight: 500; }
-    main { flex: 1; max-width: 760px; width: 100%; margin: 0 auto; padding: 16px 12px 48px; display: flex; flex-direction: column; gap: 10px; }
-    .row { display: flex; gap: 10px; animation: fadeIn 0.2s ease; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .status.running { background: var(--signal-tint); color: var(--signal); }
+    .status.running::before { animation: pulse 1.1s ease-in-out infinite; }
+    .status.error { background: var(--sev-crit-tint); color: var(--sev-crit); }
+    @keyframes pulse { 50% { opacity: .35; } }
+    .model-badge { font-family: var(--font-mono); font-size: 0.72rem; color: var(--sev-low); background: var(--sev-low-tint); padding: 4px 10px; border-radius: var(--radius-pill); }
+
+    main { flex: 1; width: 100%; max-width: 780px; margin: 0 auto; padding: 20px var(--gutter) 64px; display: flex; flex-direction: column; gap: 12px; }
+
+    .row { display: flex; gap: 12px; animation: fadeIn .22s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
     .row.system { justify-content: center; }
     .avatar {
-      width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.7rem; font-weight: 800; background: #14532d; color: #bbf7d0;
+      width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+      display: grid; place-items: center; font-family: var(--font-mono);
+      font-size: 0.72rem; font-weight: 600;
+      background: var(--brand-tint); color: var(--brand);
     }
-    .avatar.tool { background: #422006; color: #fde68a; }
-    .avatar.finding { background: #450a0a; color: #fecaca; }
-    .bubble {
-      max-width: min(100%, 620px); border: 1px solid var(--border); border-radius: 14px;
-      padding: 10px 14px; background: var(--elev); line-height: 1.5;
-    }
-    .row.agent .bubble { border-color: rgba(34,197,94,0.25); background: rgba(22,163,74,0.06); }
-    .row.tool .bubble { border-color: rgba(234,179,8,0.2); background: rgba(234,179,8,0.04); }
-    .row.finding .bubble { border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.06); }
-    .bubble .who { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
-    .bubble .body { font-size: 0.92rem; white-space: pre-wrap; word-break: break-word; }
-    .bubble .mono { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow: auto; }
-    .sys-chip {
-      font-size: 0.75rem; color: var(--muted); background: #111; border: 1px solid var(--border);
-      border-radius: 999px; padding: 4px 12px; max-width: 100%; word-break: break-word;
-    }
-    .empty { text-align: center; color: var(--muted); padding: 48px 16px; }
+    .avatar.tool { background: var(--signal-tint); color: var(--signal); }
+    .avatar.finding { background: var(--sev-crit-tint); color: var(--sev-crit); }
+    .bubble { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 15px; background: var(--surface); box-shadow: var(--shadow); }
+    .row.agent .bubble { border-color: color-mix(in srgb, var(--brand) 25%, var(--line)); }
+    .row.tool .bubble { border-color: color-mix(in srgb, var(--signal) 22%, var(--line)); }
+    .row.finding .bubble { border-color: color-mix(in srgb, var(--sev-crit) 30%, var(--line)); background: var(--sev-crit-tint); }
+    .who { font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 5px; }
+    .body { font-size: 0.94rem; white-space: pre-wrap; word-break: break-word; color: var(--ink); }
+    .body.mono { font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-soft); max-height: 300px; overflow: auto; background: var(--paper); border-radius: var(--radius-sm); padding: 10px 12px; }
+    .sys-chip { font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-soft); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 5px 14px; max-width: 100%; word-break: break-word; text-align: center; }
+    .empty { text-align: center; color: var(--ink-faint); font-family: var(--font-mono); font-size: 0.86rem; padding: 60px 16px; }
+    .theme-toggle { margin-left: auto; }
   </style>
 </head>
 <body>
-  <header>
-    <a href="/">← VibeAgent</a>
+  <header class="thread-head">
+    <a href="/" class="back">← VibeAgent</a>
     <span class="job-id" id="job-label">job —</span>
-    <span class="badge running" id="status">loading</span>
-    <span class="badge model" id="model-badge" hidden></span>
+    <span class="status running" id="status">loading</span>
+    <span class="model-badge" id="model-badge" hidden></span>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">◐</button>
   </header>
   <main id="chat">
     <div class="empty" id="empty">Waiting for agent…</div>
   </main>
   <script>
-    const params = new URLSearchParams(location.search);
-    const jobId = params.get('job') || params.get('id') || '';
-    const live = params.get('live') === '1';
-    const chat = document.getElementById('chat');
-    const empty = document.getElementById('empty');
-    const statusEl = document.getElementById('status');
-    const modelBadge = document.getElementById('model-badge');
-    document.getElementById('job-label').textContent = jobId ? 'job ' + jobId : (live ? 'live scan' : 'session');
-    const seen = new Set();
-    let finalReport = null;
+    (function () {
+      var root = document.documentElement, KEY = "vibeagent-theme";
+      try { var s = localStorage.getItem(KEY); if (s) root.setAttribute("data-theme", s); } catch (e) {}
+      var btn = document.getElementById("theme-toggle");
+      if (btn) btn.onclick = function () {
+        var dark = root.getAttribute("data-theme") === "dark" ||
+          (!root.getAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+        var next = dark ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        try { localStorage.setItem(KEY, next); } catch (e) {}
+      };
+    })();
 
-    function row(kind, who, bodyHtml, isMono) {
-      const key = kind + '|' + who + '|' + (bodyHtml || '').slice(0, 100);
+    var params = new URLSearchParams(location.search);
+    var jobId = params.get("job") || params.get("id") || "";
+    var live = params.get("live") === "1";
+    var chat = document.getElementById("chat");
+    var empty = document.getElementById("empty");
+    var statusEl = document.getElementById("status");
+    var modelBadge = document.getElementById("model-badge");
+    document.getElementById("job-label").textContent = jobId ? "job " + jobId : (live ? "live scan" : "session");
+    var seen = new Set();
+
+    var SEV = { critical: "sev-crit", high: "sev-high", medium: "sev-med", low: "sev-low", info: "sev-info" };
+
+    function setStatus(text, cls) { statusEl.textContent = text; statusEl.className = "status" + (cls ? " " + cls : ""); }
+
+    function row(kind, who, bodyText, isMono, severity) {
+      var key = kind + "|" + who + "|" + (bodyText || "").slice(0, 100);
       if (seen.has(key)) return;
       seen.add(key);
       empty.hidden = true;
-      const wrap = document.createElement('div');
-      wrap.className = 'row ' + kind;
-      if (kind === 'system') {
-        wrap.innerHTML = '<div class="sys-chip"></div>';
-        wrap.querySelector('.sys-chip').textContent = bodyHtml;
+      var wrap = document.createElement("div");
+      wrap.className = "row " + kind;
+      if (kind === "system") {
+        var chip = document.createElement("div");
+        chip.className = "sys-chip";
+        chip.textContent = bodyText;
+        wrap.appendChild(chip);
       } else {
-        const av = document.createElement('div');
-        av.className = 'avatar ' + kind;
-        av.textContent = kind === 'agent' ? 'VA' : kind === 'tool' ? '⚙' : '!';
-        const bub = document.createElement('div');
-        bub.className = 'bubble';
-        const w = document.createElement('div');
-        w.className = 'who';
-        w.textContent = who;
-        const b = document.createElement('div');
-        b.className = isMono ? 'mono' : 'body';
-        b.textContent = bodyHtml;
+        var av = document.createElement("div");
+        av.className = "avatar " + kind;
+        av.textContent = kind === "agent" ? "VA" : kind === "tool" ? "⚙" : "!";
+        var bub = document.createElement("div");
+        bub.className = "bubble";
+        var w = document.createElement("div");
+        w.className = "who";
+        if (kind === "finding" && severity && SEV[severity]) {
+          var sev = document.createElement("span");
+          sev.className = "sev " + SEV[severity];
+          sev.textContent = severity;
+          w.appendChild(sev);
+          var lbl = document.createElement("span");
+          lbl.textContent = " " + who;
+          lbl.style.marginLeft = "8px";
+          w.appendChild(lbl);
+        } else {
+          w.textContent = who;
+        }
+        var b = document.createElement("div");
+        b.className = "body" + (isMono ? " mono" : "");
+        b.textContent = bodyText;
         bub.appendChild(w); bub.appendChild(b);
         wrap.appendChild(av); wrap.appendChild(bub);
       }
       chat.appendChild(wrap);
-      wrap.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      wrap.scrollIntoView({ behavior: "smooth", block: "end" });
     }
 
     function setModel(model, provider, effort) {
       if (!model) return;
       modelBadge.hidden = false;
-      modelBadge.textContent = (provider ? provider + ' · ' : '') + model + (effort && effort !== 'none' ? ' · reason:' + effort : ' · reason:off');
+      modelBadge.textContent = (provider ? provider + " · " : "") + model + (effort && effort !== "none" ? " · reason:" + effort : " · reason:off");
     }
 
     function handleEvent(ev) {
-      const t = ev.type;
-      if (t === 'auth_ok') row('system', '', 'Authorized · ' + (ev.tier || '') + (ev.trial ? ' · trial' : '') + (ev.depth ? ' · ' + ev.depth : '') + ' · ' + JSON.stringify(ev.targets));
-      else if (t === 'model_info') setModel(ev.model, ev.provider, ev.reasoning_effort);
-      else if (t === 'round') row('system', '', 'Round ' + ev.index + '/' + ev.max);
-      else if (t === 'agent_message') row('agent', 'VibeAgent', ev.text || '');
-      else if (t === 'reasoning') row('agent', 'reasoning', ev.text || '', true);
-      else if (t === 'tool_start') row('tool', 'tool → ' + ev.tool, JSON.stringify(ev.args || {}, null, 2), true);
-      else if (t === 'tool_result') row('tool', 'tool ← ' + ev.tool + (ev.ok ? ' · ok' : ' · fail'), ev.preview || '', true);
-      else if (t === 'finding') row('finding', 'finding · ' + (ev.severity || ''), ev.detail || '');
-      else if (t === 'error') row('finding', 'error', ev.text || '');
-      else if (t === 'done') {
-        statusEl.textContent = ev.status || 'done';
-        statusEl.className = 'badge' + (ev.status === 'completed' || ev.status === 'dry_run_ok' ? '' : (ev.status === 'running' ? ' running' : ' error'));
-      } else if (t === 'final') {
+      var t = ev.type;
+      if (t === "auth_ok") row("system", "", "Authorized · " + (ev.tier || "") + (ev.trial ? " · trial" : "") + (ev.depth ? " · " + ev.depth : "") + " · " + JSON.stringify(ev.targets));
+      else if (t === "model_info") setModel(ev.model, ev.provider, ev.reasoning_effort);
+      else if (t === "round") row("system", "", "Round " + ev.index + " / " + ev.max);
+      else if (t === "agent_message") row("agent", "VibeAgent", ev.text || "");
+      else if (t === "reasoning") row("agent", "reasoning", ev.text || "", true);
+      else if (t === "tool_start") row("tool", "tool → " + ev.tool, JSON.stringify(ev.args || {}, null, 2), true);
+      else if (t === "tool_result") row("tool", "tool ← " + ev.tool + (ev.ok ? " · ok" : " · fail"), ev.preview || "", true);
+      else if (t === "finding") row("finding", (ev.tool || "finding"), ev.detail || "", false, ev.severity || "info");
+      else if (t === "error") row("finding", "error", ev.text || "", false, "critical");
+      else if (t === "done") {
+        var okDone = ev.status === "completed" || ev.status === "dry_run_ok";
+        setStatus(ev.status || "done", okDone ? "" : (ev.status === "running" ? "running" : "error"));
+      } else if (t === "final") {
         if (ev.ok && ev.report) {
-          finalReport = ev.report;
-          sessionStorage.setItem('vibeagent_last_report', JSON.stringify(ev.report));
+          try { sessionStorage.setItem("vibeagent_last_report", JSON.stringify(ev.report)); } catch (e) {}
           if (ev.report.job_id) {
-            document.getElementById('job-label').textContent = 'job ' + ev.report.job_id;
-            history.replaceState({}, '', '/thread.html?job=' + encodeURIComponent(ev.report.job_id));
+            document.getElementById("job-label").textContent = "job " + ev.report.job_id;
+            history.replaceState({}, "", "/thread.html?job=" + encodeURIComponent(ev.report.job_id));
           }
           setModel(ev.report.model, ev.report.provider, ev.report.reasoning_effort);
-          statusEl.textContent = ev.report.status || 'completed';
-          statusEl.className = 'badge';
-          if (ev.report.report_text) row('agent', 'VibeAgent · final report', ev.report.report_text);
+          setStatus(ev.report.status || "completed", "");
+          if (ev.report.report_text) row("agent", "VibeAgent · final report", ev.report.report_text);
         } else {
-          statusEl.textContent = 'error';
-          statusEl.className = 'badge error';
-          row('finding', 'error', ev.error || 'Scan failed');
+          setStatus("error", "error");
+          row("finding", "error", ev.error || "Scan failed", false, "critical");
         }
       }
     }
 
     function renderReport(report) {
       if (!report) return;
-      statusEl.textContent = report.status || 'completed';
-      statusEl.className = 'badge' + (report.status === 'running' ? ' running' : (report.status === 'completed' || report.status === 'dry_run_ok' ? '' : ' error'));
+      var running = report.status === "running";
+      var okDone = report.status === "completed" || report.status === "dry_run_ok";
+      setStatus(report.status || "completed", running ? "running" : (okDone ? "" : "error"));
       setModel(report.model, report.provider, report.reasoning_effort);
-      for (const ev of report.events || []) handleEvent(ev);
-      if (report.report_text) row('agent', 'VibeAgent · final report', report.report_text);
+      (report.events || []).forEach(handleEvent);
+      if (report.report_text) row("agent", "VibeAgent · final report", report.report_text);
     }
 
     async function startLive() {
-      const raw = sessionStorage.getItem('vibeagent_pending_scan');
-      if (!raw) {
-        statusEl.textContent = 'no payload';
-        statusEl.className = 'badge error';
-        empty.textContent = 'No pending scan. Start from /scan.html';
-        return;
-      }
-      let payload;
-      try { payload = JSON.parse(raw); } catch {
-        empty.textContent = 'Bad pending payload'; return;
-      }
-      sessionStorage.removeItem('vibeagent_pending_scan');
-      statusEl.textContent = 'streaming';
-      statusEl.className = 'badge running';
-      row('system', '', 'Connecting live stream…');
-
+      var raw = null;
+      try { raw = sessionStorage.getItem("vibeagent_pending_scan"); } catch (e) {}
+      if (!raw) { setStatus("no payload", "error"); empty.textContent = "No pending scan. Start from /scan.html"; return; }
+      var payload;
+      try { payload = JSON.parse(raw); } catch (e) { empty.textContent = "Bad pending payload."; return; }
+      try { sessionStorage.removeItem("vibeagent_pending_scan"); } catch (e) {}
+      setStatus("streaming", "running");
+      row("system", "", "Connecting live stream…");
       try {
-        const res = await fetch('/api/stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+        var res = await fetch("/api/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
         if (!res.ok || !res.body) {
-          // fallback to non-stream scan
-          const r2 = await fetch('/api/scan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          const data = await r2.json();
-          if (data.ok && data.report) {
-            sessionStorage.setItem('vibeagent_last_report', JSON.stringify(data.report));
-            renderReport(data.report);
-          } else {
-            row('finding', 'error', (data && data.error) || 'Scan failed');
-            statusEl.textContent = 'error';
-            statusEl.className = 'badge error';
-          }
+          var r2 = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+          var data = await r2.json();
+          if (data.ok && data.report) { try { sessionStorage.setItem("vibeagent_last_report", JSON.stringify(data.report)); } catch (e) {} renderReport(data.report); }
+          else { row("finding", "error", (data && data.error) || "Scan failed", false, "critical"); setStatus("error", "error"); }
           return;
         }
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buf = "";
         while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const parts = buf.split('\n\n');
-          buf = parts.pop() || '';
-          for (const part of parts) {
-            const line = part.split('\n').find(l => l.startsWith('data: '));
+          var chunk = await reader.read();
+          if (chunk.done) break;
+          buf += decoder.decode(chunk.value, { stream: true });
+          var parts = buf.split("\n\n");
+          buf = parts.pop() || "";
+          for (var i = 0; i < parts.length; i++) {
+            var line = parts[i].split("\n").find(function (l) { return l.indexOf("data: ") === 0; });
             if (!line) continue;
-            try {
-              const ev = JSON.parse(line.slice(6));
-              handleEvent(ev);
-            } catch {}
+            try { handleEvent(JSON.parse(line.slice(6))); } catch (e) {}
           }
         }
       } catch (e) {
-        row('finding', 'error', String(e));
-        statusEl.textContent = 'error';
-        statusEl.className = 'badge error';
+        row("finding", "error", String(e), false, "critical");
+        setStatus("error", "error");
       }
     }
 
     async function loadExisting() {
-      const local = (() => {
-        try {
-          const raw = sessionStorage.getItem('vibeagent_last_report');
-          if (!raw) return null;
-          const report = JSON.parse(raw);
-          if (jobId && report.job_id && report.job_id !== jobId) return null;
-          return report;
-        } catch { return null; }
-      })();
-      if (local) renderReport(local);
-      if (!jobId) {
-        if (!local) {
-          statusEl.textContent = 'no job';
-          statusEl.className = 'badge error';
-          empty.textContent = 'No job data. Start a scan from /scan.html';
-        }
-        return;
-      }
+      var local = null;
       try {
-        const res = await fetch('/api/job?id=' + encodeURIComponent(jobId));
-        const data = await res.json();
-        if (data.ok && data.report) {
-          sessionStorage.setItem('vibeagent_last_report', JSON.stringify(data.report));
-          renderReport(data.report);
-        }
-      } catch {}
+        var raw = sessionStorage.getItem("vibeagent_last_report");
+        if (raw) { var r = JSON.parse(raw); if (!(jobId && r.job_id && r.job_id !== jobId)) local = r; }
+      } catch (e) {}
+      if (local) renderReport(local);
+      if (!jobId) { if (!local) { setStatus("no job", "error"); empty.textContent = "No job data. Start a scan from /scan.html"; } return; }
+      try {
+        var res = await fetch("/api/job?id=" + encodeURIComponent(jobId));
+        var data = await res.json();
+        if (data.ok && data.report) { try { sessionStorage.setItem("vibeagent_last_report", JSON.stringify(data.report)); } catch (e) {} renderReport(data.report); }
+      } catch (e) {}
     }
 
-    if (live) startLive();
-    else loadExisting();
+    if (live) startLive(); else loadExisting();
   </script>
 </body>
 </html>

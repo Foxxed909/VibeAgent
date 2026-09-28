@@ -1,0 +1,232 @@
+/* VibeAgent — shared design system ("evidence dossier")
+   One source of truth for tokens + primitives across landing, scan console,
+   and the live thread. Light is the base identity; dark is a full peer theme. */
+
+/* ---------- Tokens ---------- */
+:root {
+  color-scheme: light;
+
+  /* Paper / ink neutrals — warm, deliberately not pure grey */
+  --paper:        #f6f4ef;
+  --surface:      #fffdf8;
+  --surface-2:    #efece3;
+  --line:         #ddd8cc;
+  --line-strong:  #c8c1b0;
+  --ink:          #17191c;
+  --ink-soft:     #4a4d52;
+  --ink-faint:    #7c7f86;
+
+  /* Brand — emerald = "authorized / go" */
+  --brand:        #0a7d52;
+  --brand-strong: #086342;
+  --brand-tint:   rgba(10, 125, 82, 0.10);
+  --on-brand:     #f6fdf9;
+
+  /* Signal — amber = "instrument / live / caution" */
+  --signal:       #b5731c;
+  --signal-tint:  rgba(181, 115, 28, 0.12);
+
+  /* Severity scale (independent of accent) */
+  --sev-crit:  #c8362c;
+  --sev-high:  #d1691f;
+  --sev-med:   #a8841a;
+  --sev-low:   #2f6fc4;
+  --sev-info:  #6b7280;
+  --sev-crit-tint: rgba(200, 54, 44, 0.12);
+  --sev-high-tint: rgba(209, 105, 31, 0.12);
+  --sev-low-tint:  rgba(47, 111, 196, 0.12);
+
+  --radius:    14px;
+  --radius-sm: 9px;
+  --radius-pill: 999px;
+  --shadow: 0 1px 2px rgba(23,25,28,.05), 0 12px 32px -18px rgba(23,25,28,.28);
+  --shadow-lg: 0 24px 60px -30px rgba(23,25,28,.45);
+
+  --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --maxw: 1080px;
+  --gutter: clamp(16px, 4vw, 32px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper:        #0b0f14;
+    --surface:      #12171e;
+    --surface-2:    #171d26;
+    --line:         #232b36;
+    --line-strong:  #333d4b;
+    --ink:          #eceef2;
+    --ink-soft:     #b2b8c2;
+    --ink-faint:    #7f8895;
+
+    --brand:        #33d492;
+    --brand-strong: #23b87c;
+    --brand-tint:   rgba(51, 212, 146, 0.14);
+    --on-brand:     #05130d;
+
+    --signal:       #f0b757;
+    --signal-tint:  rgba(240, 183, 87, 0.14);
+
+    --sev-crit:  #ff6b5e;
+    --sev-high:  #ff9d4d;
+    --sev-med:   #e8c15a;
+    --sev-low:   #6aa8ff;
+    --sev-info:  #9aa3af;
+    --sev-crit-tint: rgba(255, 107, 94, 0.14);
+    --sev-high-tint: rgba(255, 157, 77, 0.14);
+    --sev-low-tint:  rgba(106, 168, 255, 0.14);
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 40px -20px rgba(0,0,0,.7);
+    --shadow-lg: 0 30px 70px -30px rgba(0,0,0,.8);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper:        #0b0f14;
+  --surface:      #12171e;
+  --surface-2:    #171d26;
+  --line:         #232b36;
+  --line-strong:  #333d4b;
+  --ink:          #eceef2;
+  --ink-soft:     #b2b8c2;
+  --ink-faint:    #7f8895;
+
+  --brand:        #33d492;
+  --brand-strong: #23b87c;
+  --brand-tint:   rgba(51, 212, 146, 0.14);
+  --on-brand:     #05130d;
+
+  --signal:       #f0b757;
+  --signal-tint:  rgba(240, 183, 87, 0.14);
+
+  --sev-crit:  #ff6b5e;
+  --sev-high:  #ff9d4d;
+  --sev-med:   #e8c15a;
+  --sev-low:   #6aa8ff;
+  --sev-info:  #9aa3af;
+  --sev-crit-tint: rgba(255, 107, 94, 0.14);
+  --sev-high-tint: rgba(255, 157, 77, 0.14);
+  --sev-low-tint:  rgba(106, 168, 255, 0.14);
+
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 40px -20px rgba(0,0,0,.7);
+  --shadow-lg: 0 30px 70px -30px rgba(0,0,0,.8);
+}
+
+/* ---------- Reset ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+body {
+  font-family: var(--font-sans);
+  background: var(--paper);
+  color: var(--ink);
+  line-height: 1.6;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a { color: inherit; text-decoration: none; }
+img, svg { max-width: 100%; display: block; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 4px; }
+
+.wrap { max-width: var(--maxw); margin: 0 auto; padding-inline: var(--gutter); }
+
+/* ---------- Type ---------- */
+.display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.02;
+  text-wrap: balance;
+}
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+.mono { font-family: var(--font-mono); }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-family: var(--font-sans);
+  font-weight: 600; font-size: 0.94rem;
+  padding: 12px 20px; border-radius: var(--radius-sm);
+  border: 1px solid transparent; cursor: pointer;
+  transition: transform .12s ease, background .15s ease, border-color .15s ease, box-shadow .15s ease;
+  text-align: center; white-space: nowrap;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--brand); color: var(--on-brand); }
+.btn-primary:hover { background: var(--brand-strong); box-shadow: 0 8px 22px -12px var(--brand); }
+.btn-ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+.btn-ghost:hover { border-color: var(--brand); color: var(--brand); }
+.btn-block { width: 100%; }
+
+/* ---------- Nav ---------- */
+.nav {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 50;
+  background: color-mix(in srgb, var(--paper) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.1);
+  border-bottom: 1px solid var(--line);
+}
+.nav-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 66px; }
+.brand-mark { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 1.06rem; letter-spacing: -0.01em; }
+.brand-glyph {
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  background: var(--brand); color: var(--on-brand);
+  display: grid; place-items: center;
+  font-family: var(--font-mono); font-weight: 600; font-size: 15px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-brand) 20%, transparent);
+}
+.nav-links { display: flex; align-items: center; gap: 26px; }
+.nav-links a.navlink { color: var(--ink-soft); font-size: 0.9rem; font-weight: 500; transition: color .15s; }
+.nav-links a.navlink:hover { color: var(--ink); }
+.theme-toggle {
+  width: 38px; height: 38px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-soft);
+  display: grid; place-items: center; cursor: pointer; transition: color .15s, border-color .15s;
+}
+.theme-toggle:hover { color: var(--brand); border-color: var(--brand); }
+
+/* ---------- Chips / badges ---------- */
+.chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 0.76rem; font-weight: 500;
+  padding: 6px 12px; border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong); color: var(--ink-soft); background: var(--surface);
+}
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); }
+.chip-brand { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--line)); background: var(--brand-tint); }
+
+.sev {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; padding: 3px 9px; border-radius: 6px;
+}
+.sev-crit { color: var(--sev-crit); background: var(--sev-crit-tint); }
+.sev-high { color: var(--sev-high); background: var(--sev-high-tint); }
+.sev-low  { color: var(--sev-low);  background: var(--sev-low-tint); }
+.sev-info { color: var(--sev-info); background: color-mix(in srgb, var(--sev-info) 12%, transparent); }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+
+/* ---------- Footer ---------- */
+.footer { border-top: 1px solid var(--line); padding-block: 40px; color: var(--ink-faint); font-size: 0.86rem; }
+.footer-inner { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; }
+.footer .mono { color: var(--ink-faint); }
