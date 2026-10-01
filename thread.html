@@ -69,6 +69,7 @@
     <span class="badge" id="agent-badge">VibeAgent</span>
     <span class="badge running" id="status">loading</span>
     <span class="badge model" id="model-badge" hidden></span>
+    <span class="badge model" id="backend-badge" hidden></span>
     <span class="badge model" id="finding-badge" hidden></span>
     <span class="header-spacer"></span>
     <span class="report-links" id="report-links" hidden>
@@ -88,6 +89,7 @@
     const statusEl = document.getElementById('status');
     const agentBadge = document.getElementById('agent-badge');
     const modelBadge = document.getElementById('model-badge');
+    const backendBadge = document.getElementById('backend-badge');
     const findingBadge = document.getElementById('finding-badge');
     const reportLinks = document.getElementById('report-links');
     const jsonReport = document.getElementById('json-report');
@@ -151,6 +153,13 @@
         (severity.high ? ' · ' + severity.high + ' high' : '');
     }
 
+    function setBackend(backend, warning) {
+      if (!backend) return;
+      backendBadge.hidden = false;
+      backendBadge.textContent = backend + (warning ? ' · fallback ready' : '');
+      backendBadge.title = warning || '';
+    }
+
     function setModel(model, provider, effort) {
       if (!model) return;
       modelBadge.hidden = false;
@@ -163,12 +172,16 @@
         setAgent(ev.agent_name || (ev.agent_mode === 'break' ? 'BreakAgent' : 'VibeAgent'));
         row('system', '', currentAgent + ' · Authorized · ' + (ev.tier || '') + (ev.trial ? ' · trial' : '') + (ev.depth ? ' · ' + ev.depth : '') + ' · ' + JSON.stringify(ev.targets));
       }
+      else if (t === 'backend') setBackend(ev.backend, ev.warning);
       else if (t === 'model_info') setModel(ev.model, ev.provider, ev.reasoning_effort);
       else if (t === 'round') row('system', '', 'Round ' + ev.index + '/' + ev.max);
       else if (t === 'agent_message') row('agent', currentAgent, ev.text || '');
       else if (t === 'reasoning') row('agent', 'reasoning', ev.text || '', true);
       else if (t === 'tool_start') row('tool', 'tool → ' + ev.tool, JSON.stringify(ev.args || {}, null, 2), true);
-      else if (t === 'tool_result') row('tool', 'tool ← ' + ev.tool + (ev.ok ? ' · ok' : ' · fail'), ev.preview || '', true);
+      else if (t === 'tool_result') {
+        const backend = ev.backend ? ' · ' + ev.backend : '';
+        row('tool', 'tool ← ' + ev.tool + backend + (ev.ok ? ' · ok' : ' · fail'), ev.preview || '', true);
+      }
       else if (t === 'finding') {
         const title = ev.title || ev.detail || 'Finding';
         const meta = [
@@ -214,6 +227,7 @@
       setAgent(report.agent_name || (report.agent_mode === 'break' ? 'BreakAgent' : 'VibeAgent'));
       if (report.job_id) setReportLinks(report.job_id);
       setFindingSummary(report);
+      setBackend(report.execution_backend, report.worker_warning);
       statusEl.textContent = report.status || 'completed';
       statusEl.className = 'badge' + (report.status === 'running' ? ' running' : (report.status === 'completed' || report.status === 'dry_run_ok' ? '' : ' error'));
       setModel(report.model, report.provider, report.reasoning_effort);
