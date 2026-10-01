@@ -133,11 +133,20 @@ def finding_from_worker(
     *,
     default_url: str = "",
     confirmed: bool = False,
+    default_tool: str = "",
 ) -> Dict[str, Any]:
-    tool = str(raw.get("tool") or "native_worker").strip() or "native_worker"
+    tool = str(default_tool or raw.get("tool") or "native_worker").strip() or "native_worker"
     title = str(raw.get("title") or raw.get("summary") or f"{tool} finding").strip()
     evidence = str(raw.get("evidence") or raw.get("detail") or raw.get("summary") or title).strip()
     location = str(raw.get("location") or raw.get("url") or default_url).strip()
+    if "://<host>" in location and default_url:
+        try:
+            base = default_url if "://" in default_url else "https://" + default_url
+            parsed = __import__("urllib.parse", fromlist=["urlsplit"]).urlsplit(base)
+            suffix = location.split("://<host>", 1)[1]
+            location = f"{parsed.scheme}://{parsed.netloc}{suffix}"
+        except Exception:
+            location = default_url
     severity = str(raw.get("severity") or ("high" if confirmed else "info")).lower()
     if severity not in SEVERITY_RANK:
         severity = "info"
