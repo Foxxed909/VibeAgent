@@ -19,7 +19,7 @@ class LandingPageTests(unittest.TestCase):
         self.assertIn('data-agent="break"', html)
         self.assertIn("agent_mode: agentMode", html)
         self.assertIn("execution_backend: executionBackend", html)
-        self.assertIn('value="native-worker"', html)
+        self.assertIn('value="worker-tools"', html)
         self.assertIn('location.href = "/thread?live=1"', html)
 
     def test_thread_page_renders_dynamic_agent_identity(self):
