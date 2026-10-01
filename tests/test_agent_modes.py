@@ -36,7 +36,6 @@ class AgentModeTests(unittest.TestCase):
         report = run_job(auth, dry_run=True, agent_mode="break")
         self.assertEqual("break", report["agent_mode"])
         self.assertEqual("BreakAgent", report["agent_name"])
-        self.assertFalse(report["worker_tool_capabilities"]["can_launch"])
         self.assertIn("corscan", report["available_tools"])
         self.assertNotIn("bot_breaker", report["available_tools"])
         self.assertEqual("portable", report["execution_backend"])
@@ -66,6 +65,8 @@ class AgentModeTests(unittest.TestCase):
         self.assertIn("vibe_headers", report["worker_tools"])
         self.assertNotIn("bot_breaker", report["available_tools"])
         self.assertEqual("BreakAgent", report["agent_name"])
+        self.assertFalse(report["worker_tool_capabilities"]["can_launch"])
+        self.assertFalse(report["worker_tool_capabilities"]["ownership_verified"])
 
     def test_native_worker_dry_run_records_backend_without_network(self):
         auth = Authorization(
