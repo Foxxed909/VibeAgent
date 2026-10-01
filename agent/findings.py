@@ -128,6 +128,42 @@ def finding_from_line(tool: str, line: str, *, url: Optional[str] = None) -> Dic
     }
 
 
+def finding_from_worker(
+    raw: Dict[str, Any],
+    *,
+    default_url: str = "",
+    confirmed: bool = False,
+) -> Dict[str, Any]:
+    tool = str(raw.get("tool") or "native_worker").strip() or "native_worker"
+    title = str(raw.get("title") or raw.get("summary") or f"{tool} finding").strip()
+    evidence = str(raw.get("evidence") or raw.get("detail") or raw.get("summary") or title).strip()
+    location = str(raw.get("location") or raw.get("url") or default_url).strip()
+    severity = str(raw.get("severity") or ("high" if confirmed else "info")).lower()
+    if severity not in SEVERITY_RANK:
+        severity = "info"
+    validation = str(raw.get("validation_status") or ("confirmed" if confirmed else "observed")).lower()
+    recommendation = str(
+        raw.get("recommendation")
+        or TOOL_META.get(tool, {}).get("remediation")
+        or "Review the evidence and remediate the underlying security control."
+    )
+    fingerprint = f"worker|{tool}|{location}|{title}|{evidence}"
+    finding_id = "VA-" + hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:12].upper()
+    return {
+        "id": finding_id,
+        "title": title,
+        "severity": severity,
+        "validation_status": validation,
+        "tool": tool,
+        "location": location,
+        "evidence": evidence,
+        "recommendation": recommendation,
+        "cwe": raw.get("cwe"),
+        "owasp": raw.get("owasp"),
+        "source": "native-worker",
+    }
+
+
 def add_finding(report: Dict[str, Any], finding: Dict[str, Any]) -> bool:
     existing = {f.get("id") for f in report.setdefault("findings", [])}
     if finding.get("id") in existing:
