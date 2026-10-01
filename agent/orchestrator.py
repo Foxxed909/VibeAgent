@@ -90,7 +90,11 @@ def run_job(
         "stress": None,
         "agent_mode": agent_mode,
         "agent_name": active_agent,
-        "available_tools": [t["function"]["name"] for t in tool_catalog],
+        "available_tools": (
+            [t["function"]["name"] for t in tool_catalog]
+            if execution_backend == "portable"
+            else ["native-worker-managed"]
+        ),
         "execution_backend": execution_backend,
         "native_worker": None,
     }
