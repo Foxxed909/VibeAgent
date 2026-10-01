@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -19,6 +20,11 @@ JOBS_DIR = Path(os.environ.get("VIBEAGENT_JOBS_DIR", "/tmp/vibeagent_jobs"))
 KV_URL = (os.environ.get("KV_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL") or "").rstrip("/")
 KV_TOKEN = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN") or ""
 TTL_SECONDS = int(os.environ.get("VIBEAGENT_JOB_TTL", "86400"))  # 24h
+JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+
+
+def _valid_job_id(job_id: str) -> bool:
+    return bool(JOB_ID_RE.fullmatch((job_id or "").strip()))
 
 
 def _kv_enabled() -> bool:
@@ -46,7 +52,9 @@ def _kv_command(*args: Any) -> Any:
 
 
 def save_job(report: Dict[str, Any]) -> str:
-    job_id = report.get("job_id") or "unknown"
+    job_id = str(report.get("job_id") or "").strip()
+    if not _valid_job_id(job_id):
+        raise ValueError("invalid job_id")
     payload = json.dumps(report)
 
     if _kv_enabled():
@@ -68,7 +76,7 @@ def save_job(report: Dict[str, Any]) -> str:
 
 def load_job(job_id: str) -> Optional[Dict[str, Any]]:
     job_id = (job_id or "").strip()
-    if not job_id:
+    if not _valid_job_id(job_id):
         return None
 
     if _kv_enabled():
