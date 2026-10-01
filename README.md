@@ -71,13 +71,43 @@ To expose native VibeHacking capabilities:
 export VIBEHACKING_ROOT=/path/to/VibeHacking
 ```
 
+## Native VibeHacking worker
+
+Portable mode is the default. To make the full persistent VibeHacking worker available to the standalone app, configure all of these server-side variables:
+
+```bash
+VIBE_AGENT_WORKER_URL=https://worker.example.com
+VIBE_AGENT_WORKER_TOKEN=<at-least-32-random-characters>
+VIBE_AGENT_WORKER_ALLOWED_HOSTS=app.example.com,api.example.com
+VIBE_AGENT_WORKER_MODEL=laguna-s-2.1
+```
+
+The native bridge is fail-closed:
+
+- the worker URL must be HTTPS with no embedded credentials, path, query or fragment;
+- the token must be at least 32 characters;
+- targets must match an **exact hostname** in `VIBE_AGENT_WORKER_ALLOWED_HOSTS`;
+- wildcards and subdomain expansion are not accepted;
+- native jobs currently run one target per job;
+- worker redirects are refused so the worker token is never forwarded to another origin;
+- worker findings are filtered back to the exact target hostname before they enter the standalone report.
+
+Native BreakAgent is disabled by default because the upstream BreakAgent pipeline is more invasive. An operator who has separately verified and allowlisted the target must explicitly opt in:
+
+```bash
+VIBE_AGENT_ENABLE_NATIVE_BREAKAGENT=1
+```
+
+The scan form queries `/api/capabilities` and only enables the native option when that exact target and selected agent mode are permitted.
+
 ## Deploy on Vercel
 
 1. Import this repo into Vercel.
 2. Framework: **Other**.
 3. Set `OPENAI_API_KEY` and/or `OPENROUTER_API_KEY`.
 4. For durable jobs and waitlist entries, configure Vercel KV / Upstash REST variables.
-5. Deploy.
+5. Optionally configure the protected native worker variables above.
+6. Deploy.
 
 ## Status
 
@@ -91,7 +121,8 @@ export VIBEHACKING_ROOT=/path/to/VibeHacking
 - [x] Live SSE thread UI with agent identity
 - [x] Canonical structured findings with validation status, CWE/OWASP, evidence and remediation
 - [x] JSON + SARIF 2.1.0 report exports
-- [x] `/api/scan`, `/api/stream`, `/api/job`, `/api/report`
+- [x] Protected native VibeHacking worker backend with exact-host allowlist
+- [x] `/api/scan`, `/api/stream`, `/api/job`, `/api/report`, `/api/capabilities`
 - [x] Persistent cloud job store via Vercel KV / Upstash when configured
 - [x] Waitlist persistence via KV / Upstash when configured
 - [ ] Billing
