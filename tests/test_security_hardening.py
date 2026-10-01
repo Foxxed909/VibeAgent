@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from agent.orchestrator import run_job
 from agent.request_context import current_cookie, reset_cookie, set_cookie
-from agent.scope import Authorization, CONFIRM_PHRASE, is_valid_trial_code
+from agent.scope import Authorization, CONFIRM_PHRASE, ScopeError, host_in_scope, is_valid_trial_code
 from agent import target_verification
 from api._security import origin_is_allowed, read_json_body
 
@@ -25,13 +25,47 @@ class InviteCodeTests(unittest.TestCase):
     def test_private_invite_is_validated_by_server_side_hash(self):
         code = "private-invite-123"
         digest = hashlib.sha256(code.encode("utf-8")).hexdigest()
-        with patch.dict(os.environ, {"VIBE_AGENT_TRIAL_CODE_SHA256": digest}, clear=False):
+        with patch.dict(os.environ, {"VIBE_AGENT_INVITE_CODE_SHA256": digest}, clear=False):
             self.assertTrue(is_valid_trial_code(code))
             self.assertFalse(is_valid_trial_code("wrong-code"))
 
     def test_invite_is_disabled_when_hash_is_not_configured(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertFalse(is_valid_trial_code("anything"))
+
+
+class ScopeHardeningTests(unittest.TestCase):
+    def test_exact_host_does_not_authorize_subdomains(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["https://example.com"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Example",
+        ).validated()
+        self.assertTrue(host_in_scope("example.com", auth))
+        self.assertFalse(host_in_scope("api.example.com", auth))
+
+    def test_vercel_wildcard_is_rejected(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["*.vercel.app"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Example",
+        )
+        with self.assertRaises(ScopeError):
+            auth.validated()
+
+    def test_invalid_supplied_private_invite_is_rejected(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["https://demo.vercel.app"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Demo",
+            access_code="wrong-code",
+        )
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ScopeError):
+                auth.validated()
 
 
 class RequestContextTests(unittest.TestCase):
@@ -114,6 +148,13 @@ class OwnershipVerificationTests(unittest.TestCase):
         with patch.dict(os.environ, env, clear=True):
             with self.assertRaises(target_verification.VerificationError):
                 target_verification.create_challenge("https://other.example.com")
+
+
+class DeploymentHeaderTests(unittest.TestCase):
+    def test_content_security_policy_is_configured(self):
+        config = (Path(__file__).resolve().parents[1] / "vercel.json").read_text(encoding="utf-8")
+        self.assertIn("Content-Security-Policy", config)
+        self.assertIn("frame-ancestors 'none'", config)
 
 
 if __name__ == "__main__":
