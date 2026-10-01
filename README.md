@@ -71,34 +71,49 @@ To expose native VibeHacking capabilities:
 export VIBEHACKING_ROOT=/path/to/VibeHacking
 ```
 
-## Native VibeHacking worker
+## Persistent VibeHacking worker
 
-Portable mode is the default. To make the full persistent VibeHacking worker available to the standalone app, configure all of these server-side variables:
+Portable mode is the default. The recommended native path is **worker-tools**:
+the standalone VibeAgent/BreakAgent LLM loop stays in control, while compatible
+bounded audit tools execute on the persistent VibeHacking runtime.
+
+Configure the standalone app:
 
 ```bash
 VIBE_AGENT_WORKER_URL=https://worker.example.com
 VIBE_AGENT_WORKER_TOKEN=<at-least-32-random-characters>
 VIBE_AGENT_WORKER_ALLOWED_HOSTS=app.example.com,api.example.com
-VIBE_AGENT_WORKER_MODEL=laguna-s-2.1
 ```
 
-The native bridge is fail-closed:
-
-- the worker URL must be HTTPS with no embedded credentials, path, query or fragment;
-- the token must be at least 32 characters;
-- targets must match an **exact hostname** in `VIBE_AGENT_WORKER_ALLOWED_HOSTS`;
-- wildcards and subdomain expansion are not accepted;
-- native jobs currently run one target per job;
-- worker redirects are refused so the worker token is never forwarded to another origin;
-- worker findings are filtered back to the exact target hostname before they enter the standalone report.
-
-Native BreakAgent is disabled by default because the upstream BreakAgent pipeline is more invasive. An operator who has separately verified and allowlisted the target must explicitly opt in:
+Configure the VibeHacking worker with the same token and an independent exact-host
+allowlist:
 
 ```bash
-VIBE_AGENT_ENABLE_NATIVE_BREAKAGENT=1
+VIBE_WORKER_TOKEN=<same-token>
+VIBE_WORKER_ALLOWED_HOSTS=app.example.com,api.example.com
+python TOOLS/live_dashboard.py --host 0.0.0.0 --port 8080
 ```
 
-The scan form queries `/api/capabilities` and only enables the native option when that exact target and selected agent mode are permitted.
+The worker-tools bridge is fail-closed:
+
+- the standalone worker URL must be HTTPS with no embedded credentials, path, query or fragment;
+- the token must be at least 32 characters;
+- both the standalone app **and** VibeHacking worker independently enforce exact hostnames;
+- wildcards and automatic subdomain expansion are not accepted;
+- redirects are refused so the worker token is never forwarded to another origin;
+- only the worker's defensive audit allowlist is exposed remotely;
+- challenge-bypass, WAF-evasion, JWT-forging, exploit and load/stress tools are not exposed by worker-tools;
+- each remote tool call uses isolated VibeHacking artifacts and returns redacted structured findings;
+- if an individual remote tool call fails, the autonomous scan can fall back to its bounded portable implementation.
+
+The older `native-worker` whole-agent delegation backend remains available to
+operators through the CLI/API for compatibility, but it is not the normal scan
+UI path. Native BreakAgent whole-agent delegation remains separately gated by
+`VIBE_AGENT_ENABLE_NATIVE_BREAKAGENT=1`.
+
+The scan form queries `/api/capabilities` and only enables worker-tools when the
+exact target passes the standalone allowlist and the worker advertises its
+protected remote audit bridge.
 
 ## Deploy on Vercel
 
@@ -121,7 +136,7 @@ The scan form queries `/api/capabilities` and only enables the native option whe
 - [x] Live SSE thread UI with agent identity
 - [x] Canonical structured findings with validation status, CWE/OWASP, evidence and remediation
 - [x] JSON + SARIF 2.1.0 report exports
-- [x] Protected native VibeHacking worker backend with exact-host allowlist
+- [x] Autonomous VibeHacking worker-tools backend with dual exact-host allowlists
 - [x] `/api/scan`, `/api/stream`, `/api/job`, `/api/report`, `/api/capabilities`
 - [x] Persistent cloud job store via Vercel KV / Upstash when configured
 - [x] Waitlist persistence via KV / Upstash when configured
