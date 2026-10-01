@@ -16,7 +16,14 @@ from .scope import Authorization, ScopeError, assert_url_in_scope, CONFIRM_PHRAS
 from .tools_catalog import (agent_name, get_forced_tools, get_system_prompt, get_tool_catalog, normalize_agent_mode)
 from .depth import get_depth, DepthProfile
 from .findings import add_finding, finding_from_line, finding_from_worker, severity_counts
-from .worker_client import WorkerError, native_worker_capabilities, run_native_target, target_host
+from .worker_client import (
+    WorkerError,
+    native_worker_capabilities,
+    remote_audit_capabilities,
+    run_native_target,
+    run_remote_audit_tool,
+    target_host,
+)
 from . import job_store as _job_store
 
 try:
@@ -65,8 +72,22 @@ def run_job(
     active_agent = agent_name(agent_mode)
     tool_catalog = get_tool_catalog(native=bool(VIBEHACKING_ROOT), agent_mode=agent_mode)
     execution_backend = (execution_backend or "portable").strip().lower()
-    if execution_backend not in {"portable", "native-worker"}:
+    if execution_backend not in {"portable", "worker-tools", "native-worker"}:
         execution_backend = "portable"
+
+    worker_tools = set()
+    worker_warning = None
+    if execution_backend == "worker-tools":
+        caps = remote_audit_capabilities(auth.targets)
+        if not caps.get("can_launch"):
+            raise WorkerError(str(caps.get("message") or "VibeHacking audit-tool bridge is unavailable"))
+        catalog_names = {t["function"]["name"] for t in tool_catalog}
+        worker_tools = {
+            name for name in (caps.get("remote_tools") or [])
+            if name in catalog_names
+        }
+        if not worker_tools:
+            raise WorkerError("VibeHacking worker has no compatible audit tools for this agent mode.")
     if cookie:
         os.environ["VIBEAGENT_COOKIE"] = cookie
 
@@ -92,10 +113,12 @@ def run_job(
         "agent_name": active_agent,
         "available_tools": (
             [t["function"]["name"] for t in tool_catalog]
-            if execution_backend == "portable"
+            if execution_backend in {"portable", "worker-tools"}
             else ["native-worker-managed"]
         ),
         "execution_backend": execution_backend,
+        "worker_tools": sorted(worker_tools),
+        "worker_warning": worker_warning,
         "native_worker": None,
     }
 
@@ -124,6 +147,11 @@ def run_job(
         ]
         if execution_backend == "native-worker":
             report["native_worker_capabilities"] = native_worker_capabilities(auth.targets, agent_mode=agent_mode)
+        elif execution_backend == "worker-tools":
+            report["worker_tool_capabilities"] = {
+                "can_launch": True,
+                "remote_tools": sorted(worker_tools),
+            }
         report["status"] = "dry_run_ok"
         emit("done", status="dry_run_ok")
         return report
@@ -132,7 +160,9 @@ def run_job(
         return _run_native_worker_job(auth, report, emit, agent_mode, active_agent)
 
     if stress_multiplier:
-        if agent_mode == "break":
+        if execution_backend == "worker-tools":
+            emit("error", text="Stress mode is not available through the bounded worker-tools backend.")
+        elif agent_mode == "break":
             emit("error", text="BreakAgent does not run stress mode; use VibeAgent for explicitly authorized load checks.")
         elif not (trial or auth.tier == "enterprise"):
             emit("error", text="Stress multipliers require Enterprise tier or trial access code.")
@@ -185,7 +215,7 @@ def run_job(
             args: Dict[str, Any] = {"url": base}
             if tname == "api_finder":
                 args["max_paths"] = profile.max_paths_per_tool
-            _run_one_tool(tname, args, auth, report, emit, profile)
+            _run_one_tool(tname, args, auth, report, emit, profile, worker_tools=worker_tools)
             if tname == "api_finder" and profile.follow_up_on_hits:
                 last = report["tool_calls"][-1] if report["tool_calls"] else None
                 out = ((last or {}).get("result") or {}).get("stdout") or ""
@@ -194,7 +224,7 @@ def run_job(
                         assert_url_in_scope(hit_url, auth)
                     except ScopeError:
                         continue
-                    _run_one_tool("vibe_headers", {"url": hit_url}, auth, report, emit, profile)
+                    _run_one_tool("vibe_headers", {"url": hit_url}, auth, report, emit, profile, worker_tools=worker_tools)
 
     tool_digest = []
     for tc in report["tool_calls"]:
@@ -256,11 +286,19 @@ def run_job(
             try:
                 if url:
                     assert_url_in_scope(url, auth)
-                result = _dispatch_tool(name, args, auth, profile)
+                result = _dispatch_tool(name, args, auth, profile, worker_tools=worker_tools)
                 report["tool_calls"].append({"tool": name, "args": args, "result": result})
                 out = result.get("stdout") or result.get("message") or json.dumps(result)[:3000]
-                emit("tool_result", tool=name, ok=True, preview=(out or "")[:2500])
-                _harvest_findings(name, out, report, emit, args=args)
+                emit(
+                    "tool_result",
+                    tool=name,
+                    ok=int(result.get("returncode") or 0) == 0,
+                    backend=result.get("backend"),
+                    preview=(out or "")[:2500],
+                )
+                native_count = _harvest_worker_findings(name, result, report, emit, args=args)
+                if not native_count:
+                    _harvest_findings(name, out, report, emit, args=args)
                 messages.append({"role": "tool", "tool_call_id": tc_id, "content": (out or "")[:6000]})
             except ScopeError as e:
                 report["errors"].append(f"Scope violation blocked: {e}")
@@ -423,18 +461,26 @@ def _run_native_worker_job(
     return report
 
 
-def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile) -> None:
+def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile, *, worker_tools=None) -> None:
     emit("tool_start", tool=name, args=args)
     last_err = None
     for attempt in range(1, profile.tool_retries + 1):
         try:
             if args.get("url"):
                 assert_url_in_scope(args["url"], auth)
-            result = _dispatch_tool(name, args, auth, profile)
+            result = _dispatch_tool(name, args, auth, profile, worker_tools=worker_tools)
             report["tool_calls"].append({"tool": name, "args": args, "result": result})
             out = result.get("stdout") or result.get("message") or json.dumps(result)[:3000]
-            emit("tool_result", tool=name, ok=True, preview=(out or "")[:2500])
-            _harvest_findings(name, out, report, emit, args=args)
+            emit(
+                "tool_result",
+                tool=name,
+                ok=int(result.get("returncode") or 0) == 0,
+                backend=result.get("backend"),
+                preview=(out or "")[:2500],
+            )
+            native_count = _harvest_worker_findings(name, result, report, emit, args=args)
+            if not native_count:
+                _harvest_findings(name, out, report, emit, args=args)
             if "[CHALLENGE]" in (out or ""):
                 emit("finding", severity="info", detail=f"Bot/CDN challenge during {name}")
             return
@@ -452,6 +498,16 @@ def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile) -> None
 def _parse_api_hits(base: str, stdout: str) -> List[str]:
     hits = []
     for line in (stdout or "").splitlines():
+        if "FOUND" in line and "—" in line:
+            candidate = line.split("—", 1)[1].strip().split()[0].strip(".,;()")
+            if "://<host>" in candidate:
+                suffix = candidate.split("://<host>", 1)[1]
+                if suffix.startswith("/"):
+                    hits.append(base.rstrip("/") + suffix)
+                    continue
+            if candidate.startswith(("http://", "https://")):
+                hits.append(candidate)
+                continue
         if "\u2192" not in line and "\u2192" not in line and "\u2192" not in line:
             if "\u2192" not in line and "->" not in line and "\u2192" not in line:
                 # support both arrow forms
@@ -478,6 +534,42 @@ def _parse_api_hits(base: str, stdout: str) -> List[str]:
             continue
         hits.append(urljoin(base.rstrip("/") + "/", path.lstrip("/")))
     return hits[:12]
+
+
+def _harvest_worker_findings(
+    name: str,
+    result: Dict[str, Any],
+    report: Dict[str, Any],
+    emit,
+    *,
+    args: Optional[Dict[str, Any]] = None,
+) -> int:
+    raw_findings = result.get("findings") or []
+    if not isinstance(raw_findings, list):
+        return 0
+    added = 0
+    default_url = str((args or {}).get("url") or "")
+    for raw in raw_findings[:50]:
+        if not isinstance(raw, dict):
+            continue
+        finding = finding_from_worker(raw, default_url=default_url, confirmed=False)
+        if add_finding(report, finding):
+            added += 1
+            emit(
+                "finding",
+                id=finding.get("id"),
+                title=finding.get("title"),
+                severity=finding.get("severity"),
+                validation_status=finding.get("validation_status"),
+                tool=finding.get("tool"),
+                location=finding.get("location"),
+                evidence=finding.get("evidence"),
+                recommendation=finding.get("recommendation"),
+                cwe=finding.get("cwe"),
+                owasp=finding.get("owasp"),
+                detail=finding.get("evidence"),
+            )
+    return added
 
 
 def _harvest_findings(
@@ -519,8 +611,31 @@ def _local_findings_fallback(report: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _dispatch_tool(name: str, args: Dict[str, Any], auth: Authorization, profile: Optional[DepthProfile] = None) -> Any:
+def _dispatch_tool(
+    name: str,
+    args: Dict[str, Any],
+    auth: Authorization,
+    profile: Optional[DepthProfile] = None,
+    *,
+    worker_tools=None,
+) -> Any:
     url = args.get("url") or ""
+    worker_tools = set(worker_tools or ())
+    worker_error = ""
+
+    if name in worker_tools:
+        try:
+            remote = run_remote_audit_tool(url, name, args=args)
+            return {
+                "backend": "vibehacking-worker",
+                "returncode": int(remote.get("returncode") or 0),
+                "stdout": str(remote.get("stdout") or "")[-6000:],
+                "stderr": str(remote.get("stderr") or "")[-1000:],
+                "findings": remote.get("findings") if isinstance(remote.get("findings"), list) else [],
+            }
+        except WorkerError as exc:
+            worker_error = str(exc)
+
     if VIBEHACKING_ROOT:
         script = Path(VIBEHACKING_ROOT) / "TOOLS" / f"{name}.py"
         if script.exists():
@@ -538,14 +653,30 @@ def _dispatch_tool(name: str, args: Dict[str, Any], auth: Authorization, profile
                 timeout=(profile.tool_timeout_s if profile else 20),
                 cwd=VIBEHACKING_ROOT,
             )
-            return {"returncode": proc.returncode, "stdout": (proc.stdout or "")[-6000:], "stderr": (proc.stderr or "")[-1000:]}
+            return {
+                "backend": "local-vibehacking",
+                "returncode": proc.returncode,
+                "stdout": (proc.stdout or "")[-6000:],
+                "stderr": (proc.stderr or "")[-1000:],
+            }
+
     if name == "api_finder" and profile:
         args = dict(args)
         args["max_paths"] = profile.max_paths_per_tool
     builtin = run_builtin(name, args)
     if not builtin.get("stub"):
+        builtin = dict(builtin)
+        builtin["backend"] = "portable"
+        if worker_error:
+            builtin["worker_error"] = worker_error
+            builtin["stdout"] = f"[WORKER_FALLBACK] {worker_error}\n" + str(builtin.get("stdout") or "")
         return builtin
-    return {"stub": True, "message": f"Tool {name} acknowledged for {url}."}
+    return {
+        "backend": "portable",
+        "stub": True,
+        "message": f"Tool {name} acknowledged for {url}.",
+        "worker_error": worker_error or None,
+    }
 
 
 def save_job(report: Dict[str, Any]) -> str:
