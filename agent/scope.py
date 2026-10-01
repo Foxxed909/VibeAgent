@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 
 CONFIRM_PHRASE = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS"
 
-# Optional private invite/private invite code. Store only its SHA-256 digest server-side.
+# Optional private invite code. Store only its SHA-256 digest server-side.
 # Example: printf %s 'your-private-code' | shasum -a 256
 TRIAL_CODE_SHA256_ENV = "VIBE_AGENT_TRIAL_CODE_SHA256"
 
@@ -43,6 +43,8 @@ class Authorization:
             raise ScopeError("At least one exact target is required.")
 
         trial = is_valid_trial_code(self.access_code)
+        if self.access_code and not trial:
+            raise ScopeError("Invalid private invite code.")
         if trial:
             # Trial always runs as Hobby scope rules
             self.tier = "hobby"
@@ -130,7 +132,7 @@ def host_in_scope(host: str, auth: Authorization) -> bool:
                 th = ""
         else:
             th = t.split("/")[0].split(":")[0]
-        if host == th or host.endswith("." + th):
+        if host == th:
             return True
         if auth.tier == "enterprise" and "/" in t:
             try:
