@@ -12,6 +12,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from agent.worker_client import native_worker_capabilities
+from agent.target_verification import is_target_verified
 
 
 class handler(BaseHTTPRequestHandler):
@@ -21,11 +22,14 @@ class handler(BaseHTTPRequestHandler):
         agent_mode = (qs.get("agent") or ["vibe"])[0].strip().lower()
         targets = [target] if target else []
         caps = native_worker_capabilities(targets, agent_mode=agent_mode)
+        verified = bool(target and is_target_verified(target))
 
         # Do not expose the configured allowlist itself to public clients.
         native = {
             "configured": bool(caps.get("configured")),
-            "can_launch": bool(caps.get("can_launch")) if target else False,
+            "can_launch": bool(caps.get("can_launch")) and verified if target else False,
+            "allowlisted": bool(caps.get("can_launch")) if target else False,
+            "ownership_verified": verified,
             "native_breakagent_enabled": bool(caps.get("native_breakagent_enabled")),
             "model": caps.get("model"),
             "message": caps.get("message"),
