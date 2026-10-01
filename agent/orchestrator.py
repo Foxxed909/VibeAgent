@@ -17,6 +17,7 @@ from .tools_catalog import (agent_name, get_forced_tools, get_system_prompt, get
 from .depth import get_depth, DepthProfile
 from .findings import add_finding, finding_from_line, finding_from_worker, severity_counts
 from .worker_client import WorkerError, native_worker_capabilities, run_native_target, target_host
+from .target_verification import is_target_verified
 from .request_context import reset_cookie, set_cookie
 from . import job_store as _job_store
 
@@ -155,6 +156,9 @@ def _run_job_impl(
         ]
         if execution_backend == "native-worker":
             report["native_worker_capabilities"] = native_worker_capabilities(auth.targets, agent_mode=agent_mode)
+            report["native_worker_capabilities"]["ownership_verified"] = (
+                len(auth.targets) == 1 and is_target_verified(auth.targets[0])
+            )
         report["status"] = "dry_run_ok"
         emit("done", status="dry_run_ok")
         return report
@@ -367,6 +371,10 @@ def _run_native_worker_job(
         raise WorkerError("native-worker backend currently requires exactly one target per job")
 
     target = auth.targets[0]
+    if not is_target_verified(target):
+        raise WorkerError(
+            "native-worker target ownership is not verified; complete the /.well-known/vibeagent-verification.txt challenge first"
+        )
     caps = native_worker_capabilities(auth.targets, agent_mode=agent_mode)
     if not caps.get("can_launch"):
         rejected = caps.get("rejected_targets") or []
