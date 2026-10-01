@@ -70,6 +70,9 @@ class ReportingTests(unittest.TestCase):
             "provider": "openai",
             "model": "test-model",
             "reasoning_effort": "none",
+            "execution_backend": "vibehacking-worker",
+            "worker_tools": ["vibe_headers", "corscan"],
+            "worker_warning": None,
             "findings": [finding],
             "errors": [],
             "report_text": "## Findings\n- confirmed",
@@ -81,6 +84,8 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual("BreakAgent", payload["agent"]["name"])
         self.assertEqual(1, payload["summary"]["total_findings"])
         self.assertEqual(1, payload["summary"]["severity"]["high"])
+        self.assertEqual("vibehacking-worker", payload["execution"]["backend"])
+        self.assertIn("corscan", payload["execution"]["worker_tools"])
         parsed = json.loads(json_bytes(self.sample_report()).decode("utf-8"))
         self.assertEqual("abc123def456", parsed["job_id"])
 
