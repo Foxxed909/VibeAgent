@@ -11,6 +11,7 @@ class handler(BaseHTTPRequestHandler):
             "routes": [
                 "GET  /api",
                 "GET  /api/capabilities",
+                "POST /api/verify_target  (native target ownership)",
                 "POST /api/scan",
                 "POST /api/stream  (SSE live events)",
                 "GET  /api/job?id=",
