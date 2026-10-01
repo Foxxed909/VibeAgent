@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from agent.findings import add_finding, finding_from_line, severity_counts
+from agent.findings import add_finding, finding_from_line, finding_from_worker, severity_counts
 from agent.reporting import json_bytes, normalized_report, sarif_dict
 
 
@@ -36,6 +36,22 @@ class StructuredFindingTests(unittest.TestCase):
         self.assertTrue(add_finding(report, finding))
         self.assertFalse(add_finding(report, dict(finding)))
         self.assertEqual(1, len(report["findings"]))
+
+    def test_worker_finding_restores_redacted_authorized_host(self):
+        finding = finding_from_worker(
+            {
+                "tool": "VibeHeaders",
+                "title": "Missing policy",
+                "severity": "medium",
+                "location": "https://<host>/admin",
+                "evidence": "header missing",
+                "cwe": "CWE-693",
+            },
+            default_url="https://app.example.com",
+            default_tool="vibe_headers",
+        )
+        self.assertEqual("https://app.example.com/admin", finding["location"])
+        self.assertEqual("vibe_headers", finding["tool"])
 
     def test_severity_counts(self):
         report = {"findings": [
