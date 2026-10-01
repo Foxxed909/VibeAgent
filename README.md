@@ -9,7 +9,7 @@ Both modes share the same model layer, scope enforcement, SSE live thread, job p
 
 ## Product tiers
 
-- **Hobby** — $50 / scan · exact URLs + `*.vercel.app` only · optional private invite support
+- **Hobby** — $50 / scan · exact URLs/hosts only (exact Vercel app hostnames supported) · optional private invite support
 - **Enterprise** — $200 / scan · hosts, URLs, IP ranges
 
 Powered by [VibeHacking](https://github.com/Foxxed909/VibeHacking) tools. Agents only operate against targets the user declares and confirms.
@@ -78,10 +78,10 @@ export VIBEHACKING_ROOT=/path/to/VibeHacking
 No invite/access code is embedded in the frontend or repository. Optional invite access uses only a server-side SHA-256 digest:
 
 ```bash
-VIBE_AGENT_TRIAL_CODE_SHA256=<64-character-sha256>
+VIBE_AGENT_INVITE_CODE_SHA256=<64-character-sha256>
 ```
 
-The raw code is compared server-side using a constant-time digest comparison.
+The raw code is compared server-side using a constant-time digest comparison. `VIBE_AGENT_TRIAL_CODE_SHA256` remains accepted as a legacy deployment alias.
 
 ### API origin boundary
 
@@ -136,7 +136,7 @@ The worker-tools bridge is fail-closed:
 - the token must be at least 32 characters;
 - both the standalone app **and** VibeHacking worker independently enforce exact hostnames;
 - worker-backed targets also require the one-time `/.well-known/vibeagent-verification.txt` proof;
-- wildcards and automatic subdomain expansion are not accepted;
+- wildcards and automatic subdomain expansion are not accepted by any execution backend;
 - redirects are refused so the worker token is never forwarded to another origin;
 - only the worker's defensive audit allowlist is exposed remotely;
 - challenge-bypass, WAF-evasion, JWT-forging, exploit and load/stress tools are not exposed by worker-tools;
@@ -194,6 +194,8 @@ The workspace is backed by `GET /api/jobs?include=findings`. KV / Upstash is rec
 - [x] Same-origin sensitive API boundary + request-size limits
 - [x] Worker target ownership verification
 - [ ] Billing
+
+Exact host declarations never authorize sibling or child subdomains; list every authorized hostname explicitly.
 
 ## Golden rule
 
