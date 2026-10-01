@@ -552,7 +552,7 @@ def _harvest_worker_findings(
     for raw in raw_findings[:50]:
         if not isinstance(raw, dict):
             continue
-        finding = finding_from_worker(raw, default_url=default_url, confirmed=False)
+        finding = finding_from_worker(raw, default_url=default_url, confirmed=False, default_tool=name)
         if add_finding(report, finding):
             added += 1
             emit(
