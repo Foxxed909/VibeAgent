@@ -98,6 +98,8 @@ class AgentModeTests(unittest.TestCase):
             "VIBE_AGENT_WORKER_ALLOWED_HOSTS": "demo.vercel.app",
         }
         with patch.dict(os.environ, env, clear=True), patch(
+            "agent.orchestrator.is_target_verified", return_value=True
+        ), patch(
             "agent.orchestrator.run_native_target", return_value=worker_state
         ):
             report = run_job(
