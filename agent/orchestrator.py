@@ -119,7 +119,7 @@ def run_job(
             f"Retries={profile.tool_retries}, timeout={profile.tool_timeout_s}s",
         ]
         if execution_backend == "native-worker":
-            report["native_worker_capabilities"] = native_worker_capabilities(auth.targets)
+            report["native_worker_capabilities"] = native_worker_capabilities(auth.targets, agent_mode=agent_mode)
         report["status"] = "dry_run_ok"
         emit("done", status="dry_run_ok")
         return report
@@ -332,7 +332,7 @@ def _run_native_worker_job(
         raise WorkerError("native-worker backend currently requires exactly one target per job")
 
     target = auth.targets[0]
-    caps = native_worker_capabilities(auth.targets)
+    caps = native_worker_capabilities(auth.targets, agent_mode=agent_mode)
     if not caps.get("can_launch"):
         rejected = caps.get("rejected_targets") or []
         if rejected:
