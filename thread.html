@@ -58,6 +58,7 @@
   <header>
     <a href="/">← VibeAgent</a>
     <span class="job-id" id="job-label">job —</span>
+    <span class="badge" id="agent-badge">VibeAgent</span>
     <span class="badge running" id="status">loading</span>
     <span class="badge model" id="model-badge" hidden></span>
   </header>
@@ -71,10 +72,18 @@
     const chat = document.getElementById('chat');
     const empty = document.getElementById('empty');
     const statusEl = document.getElementById('status');
+    const agentBadge = document.getElementById('agent-badge');
     const modelBadge = document.getElementById('model-badge');
     document.getElementById('job-label').textContent = jobId ? 'job ' + jobId : (live ? 'live scan' : 'session');
     const seen = new Set();
     let finalReport = null;
+    let currentAgent = 'VibeAgent';
+
+    function setAgent(name) {
+      currentAgent = name === 'BreakAgent' ? 'BreakAgent' : 'VibeAgent';
+      agentBadge.textContent = currentAgent;
+      document.title = 'Scan thread — ' + currentAgent;
+    }
 
     function row(kind, who, bodyHtml, isMono) {
       const key = kind + '|' + who + '|' + (bodyHtml || '').slice(0, 100);
@@ -89,7 +98,7 @@
       } else {
         const av = document.createElement('div');
         av.className = 'avatar ' + kind;
-        av.textContent = kind === 'agent' ? 'VA' : kind === 'tool' ? '⚙' : '!';
+        av.textContent = kind === 'agent' ? (currentAgent === 'BreakAgent' ? 'BA' : 'VA') : kind === 'tool' ? '⚙' : '!';
         const bub = document.createElement('div');
         bub.className = 'bubble';
         const w = document.createElement('div');
@@ -113,10 +122,13 @@
 
     function handleEvent(ev) {
       const t = ev.type;
-      if (t === 'auth_ok') row('system', '', 'Authorized · ' + (ev.tier || '') + (ev.trial ? ' · trial' : '') + (ev.depth ? ' · ' + ev.depth : '') + ' · ' + JSON.stringify(ev.targets));
+      if (t === 'auth_ok') {
+        setAgent(ev.agent_name || (ev.agent_mode === 'break' ? 'BreakAgent' : 'VibeAgent'));
+        row('system', '', currentAgent + ' · Authorized · ' + (ev.tier || '') + (ev.trial ? ' · trial' : '') + (ev.depth ? ' · ' + ev.depth : '') + ' · ' + JSON.stringify(ev.targets));
+      }
       else if (t === 'model_info') setModel(ev.model, ev.provider, ev.reasoning_effort);
       else if (t === 'round') row('system', '', 'Round ' + ev.index + '/' + ev.max);
-      else if (t === 'agent_message') row('agent', 'VibeAgent', ev.text || '');
+      else if (t === 'agent_message') row('agent', currentAgent, ev.text || '');
       else if (t === 'reasoning') row('agent', 'reasoning', ev.text || '', true);
       else if (t === 'tool_start') row('tool', 'tool → ' + ev.tool, JSON.stringify(ev.args || {}, null, 2), true);
       else if (t === 'tool_result') row('tool', 'tool ← ' + ev.tool + (ev.ok ? ' · ok' : ' · fail'), ev.preview || '', true);
@@ -131,12 +143,12 @@
           sessionStorage.setItem('vibeagent_last_report', JSON.stringify(ev.report));
           if (ev.report.job_id) {
             document.getElementById('job-label').textContent = 'job ' + ev.report.job_id;
-            history.replaceState({}, '', '/thread.html?job=' + encodeURIComponent(ev.report.job_id));
+            history.replaceState({}, '', '/thread?job=' + encodeURIComponent(ev.report.job_id));
           }
           setModel(ev.report.model, ev.report.provider, ev.report.reasoning_effort);
           statusEl.textContent = ev.report.status || 'completed';
           statusEl.className = 'badge';
-          if (ev.report.report_text) row('agent', 'VibeAgent · final report', ev.report.report_text);
+          if (ev.report.report_text) row('agent', currentAgent + ' · final report', ev.report.report_text);
         } else {
           statusEl.textContent = 'error';
           statusEl.className = 'badge error';
@@ -147,11 +159,12 @@
 
     function renderReport(report) {
       if (!report) return;
+      setAgent(report.agent_name || (report.agent_mode === 'break' ? 'BreakAgent' : 'VibeAgent'));
       statusEl.textContent = report.status || 'completed';
       statusEl.className = 'badge' + (report.status === 'running' ? ' running' : (report.status === 'completed' || report.status === 'dry_run_ok' ? '' : ' error'));
       setModel(report.model, report.provider, report.reasoning_effort);
       for (const ev of report.events || []) handleEvent(ev);
-      if (report.report_text) row('agent', 'VibeAgent · final report', report.report_text);
+      if (report.report_text) row('agent', currentAgent + ' · final report', report.report_text);
     }
 
     async function startLive() {
@@ -159,13 +172,14 @@
       if (!raw) {
         statusEl.textContent = 'no payload';
         statusEl.className = 'badge error';
-        empty.textContent = 'No pending scan. Start from /scan.html';
+        empty.textContent = 'No pending scan. Start from /scan';
         return;
       }
       let payload;
       try { payload = JSON.parse(raw); } catch {
         empty.textContent = 'Bad pending payload'; return;
       }
+      setAgent(payload.agent_mode === 'break' ? 'BreakAgent' : 'VibeAgent');
       sessionStorage.removeItem('vibeagent_pending_scan');
       statusEl.textContent = 'streaming';
       statusEl.className = 'badge running';
@@ -235,7 +249,7 @@
         if (!local) {
           statusEl.textContent = 'no job';
           statusEl.className = 'badge error';
-          empty.textContent = 'No job data. Start a scan from /scan.html';
+          empty.textContent = 'No job data. Start a scan from /scan';
         }
         return;
       }
