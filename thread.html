@@ -26,6 +26,14 @@
     .badge.running { background: rgba(59,130,246,0.15); color: var(--info); }
     .badge.error { background: rgba(239,68,68,0.15); color: var(--crit); }
     .badge.model { background: rgba(59,130,246,0.12); color: #93c5fd; font-family: var(--mono); font-weight: 500; }
+    .header-spacer { flex: 1; }
+    .report-links { display: flex; gap: 6px; margin-left: auto; }
+    .report-link {
+      display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 7px;
+      border: 1px solid var(--border); background: #111; color: var(--muted);
+      font-family: var(--mono); font-size: 0.7rem; text-decoration: none;
+    }
+    .report-link:hover { color: var(--text); border-color: #333; }
     main { flex: 1; max-width: 760px; width: 100%; margin: 0 auto; padding: 16px 12px 48px; display: flex; flex-direction: column; gap: 10px; }
     .row { display: flex; gap: 10px; animation: fadeIn 0.2s ease; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -61,6 +69,12 @@
     <span class="badge" id="agent-badge">VibeAgent</span>
     <span class="badge running" id="status">loading</span>
     <span class="badge model" id="model-badge" hidden></span>
+    <span class="badge model" id="finding-badge" hidden></span>
+    <span class="header-spacer"></span>
+    <span class="report-links" id="report-links" hidden>
+      <a class="report-link" id="json-report" href="#">JSON</a>
+      <a class="report-link" id="sarif-report" href="#">SARIF</a>
+    </span>
   </header>
   <main id="chat">
     <div class="empty" id="empty">Waiting for agent…</div>
@@ -74,6 +88,10 @@
     const statusEl = document.getElementById('status');
     const agentBadge = document.getElementById('agent-badge');
     const modelBadge = document.getElementById('model-badge');
+    const findingBadge = document.getElementById('finding-badge');
+    const reportLinks = document.getElementById('report-links');
+    const jsonReport = document.getElementById('json-report');
+    const sarifReport = document.getElementById('sarif-report');
     document.getElementById('job-label').textContent = jobId ? 'job ' + jobId : (live ? 'live scan' : 'session');
     const seen = new Set();
     let finalReport = null;
@@ -114,6 +132,25 @@
       wrap.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
 
+    function setReportLinks(id) {
+      if (!id) return;
+      const encoded = encodeURIComponent(id);
+      jsonReport.href = '/api/report?id=' + encoded + '&format=json';
+      sarifReport.href = '/api/report?id=' + encoded + '&format=sarif';
+      reportLinks.hidden = false;
+    }
+
+    function setFindingSummary(report) {
+      const summary = report && report.summary;
+      if (!summary) return;
+      const severity = summary.severity || {};
+      findingBadge.hidden = false;
+      findingBadge.textContent =
+        (summary.total_findings || 0) + ' findings' +
+        (severity.critical ? ' · ' + severity.critical + ' crit' : '') +
+        (severity.high ? ' · ' + severity.high + ' high' : '');
+    }
+
     function setModel(model, provider, effort) {
       if (!model) return;
       modelBadge.hidden = false;
@@ -132,7 +169,20 @@
       else if (t === 'reasoning') row('agent', 'reasoning', ev.text || '', true);
       else if (t === 'tool_start') row('tool', 'tool → ' + ev.tool, JSON.stringify(ev.args || {}, null, 2), true);
       else if (t === 'tool_result') row('tool', 'tool ← ' + ev.tool + (ev.ok ? ' · ok' : ' · fail'), ev.preview || '', true);
-      else if (t === 'finding') row('finding', 'finding · ' + (ev.severity || ''), ev.detail || '');
+      else if (t === 'finding') {
+        const title = ev.title || ev.detail || 'Finding';
+        const meta = [
+          ev.validation_status,
+          ev.cwe,
+          ev.owasp,
+          ev.location
+        ].filter(Boolean).join(' · ');
+        row(
+          'finding',
+          'finding · ' + (ev.severity || 'info'),
+          title + (meta ? '\n' + meta : '') + (ev.evidence && ev.evidence !== title ? '\n\n' + ev.evidence : '')
+        );
+      }
       else if (t === 'error') row('finding', 'error', ev.text || '');
       else if (t === 'done') {
         statusEl.textContent = ev.status || 'done';
@@ -144,7 +194,9 @@
           if (ev.report.job_id) {
             document.getElementById('job-label').textContent = 'job ' + ev.report.job_id;
             history.replaceState({}, '', '/thread?job=' + encodeURIComponent(ev.report.job_id));
+            setReportLinks(ev.report.job_id);
           }
+          setFindingSummary(ev.report);
           setModel(ev.report.model, ev.report.provider, ev.report.reasoning_effort);
           statusEl.textContent = ev.report.status || 'completed';
           statusEl.className = 'badge';
@@ -160,6 +212,8 @@
     function renderReport(report) {
       if (!report) return;
       setAgent(report.agent_name || (report.agent_mode === 'break' ? 'BreakAgent' : 'VibeAgent'));
+      if (report.job_id) setReportLinks(report.job_id);
+      setFindingSummary(report);
       statusEl.textContent = report.status || 'completed';
       statusEl.className = 'badge' + (report.status === 'running' ? ' running' : (report.status === 'completed' || report.status === 'dry_run_ok' ? '' : ' error'));
       setModel(report.model, report.provider, report.reasoning_effort);
