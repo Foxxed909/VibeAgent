@@ -1,19 +1,18 @@
-"""GET /api/job?id= — fetch job report for thread UI."""
+"""GET /api/jobs — recent assessment summaries for the workspace."""
 from __future__ import annotations
 
 import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
-
-from api._security import apply_cors, require_allowed_origin
+from urllib.parse import parse_qs, urlparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from agent.job_store import load_job, backend_name
+from agent.job_store import backend_name, list_jobs
+from api._security import apply_cors, require_allowed_origin
 
 
 class handler(BaseHTTPRequestHandler):
@@ -21,13 +20,18 @@ class handler(BaseHTTPRequestHandler):
         if not require_allowed_origin(self):
             return
         qs = parse_qs(urlparse(self.path).query)
-        job_id = (qs.get("id") or [""])[0].strip()
-        if not job_id:
-            return self._json(400, {"ok": False, "error": "id required"})
-        report = load_job(job_id)
-        if not report:
-            return self._json(404, {"ok": False, "error": "job not found", "store": backend_name()})
-        return self._json(200, {"ok": True, "report": report, "store": backend_name()})
+        try:
+            limit = int((qs.get("limit") or ["30"])[0])
+        except ValueError:
+            limit = 30
+        include_findings = (qs.get("include") or [""])[0].strip().lower() == "findings"
+        jobs = list_jobs(limit=limit, include_findings=include_findings)
+        return self._json(200, {
+            "ok": True,
+            "jobs": jobs,
+            "count": len(jobs),
+            "store": backend_name(),
+        })
 
     def do_OPTIONS(self):
         if not require_allowed_origin(self):

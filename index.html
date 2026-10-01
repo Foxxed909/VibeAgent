@@ -200,6 +200,8 @@
       <a href="/" class="logo"><span class="logo-mark">V</span> VibeAgent</a>
       <div class="nav-links">
         <a href="#how">How it works</a>
+        <a href="#platform">Platform</a>
+        <a href="/app">Workspace</a>
         <a href="#pricing">Pricing</a>
         <a href="#scope">Scope rules</a>
         <a href="/scan" class="btn btn-primary">Start a scan</a>
@@ -212,14 +214,14 @@
       <div class="badge">Authorized testing only · Exact targets</div>
       <h1>Affordable autonomous<br/><span>security testing</span></h1>
       <p class="hero-sub">
-        Point it at apps you own. Get evidence-based findings and PoCs —
-        without the $5,000 enterprise price tag.
+        Run VibeAgent for discovery or BreakAgent for validation. Stream evidence live,
+        execute bounded tools locally or through an approved VibeHacking worker, then export JSON or SARIF reports.
       </p>
       <div class="hero-cta">
         <a href="/scan" class="btn btn-primary">Start with Hobby — $50</a>
         <a href="#how" class="btn btn-ghost">See how it works</a>
       </div>
-      <p class="hero-note">Hobby targets: exact URLs + *.vercel.app only</p>
+      <p class="hero-note">Exact scope · private invite validation · verified worker targets</p>
     </div>
   </header>
 
@@ -236,8 +238,8 @@
         </div>
         <div class="step">
           <div class="step-num">02</div>
-          <h3>Confirm ownership</h3>
-          <p>Type the phrase <code>I OWN OR AM AUTHORIZED TO TEST THESE TARGETS</code>. No scan starts without it.</p>
+          <h3>Confirm authorization</h3>
+          <p>Type the authorization phrase before any run. Worker-backed execution adds a one-time <code>/.well-known</code> proof-of-control step.</p>
         </div>
         <div class="step">
           <div class="step-num">03</div>
@@ -247,7 +249,47 @@
         <div class="step">
           <div class="step-num">04</div>
           <h3>Get the report</h3>
-          <p>Structured findings, severity, and reproducible evidence you can verify yourself.</p>
+          <p>Structured findings with validation status, CWE/OWASP mapping and remediation, plus JSON and SARIF 2.1.0 exports.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="platform">
+    <div class="container">
+      <div class="section-label">Platform</div>
+      <h2 class="section-title">Two agents. Local or worker-backed tools. One evidence model.</h2>
+      <p class="section-desc">VibeAgent keeps the autonomous reasoning loop in the standalone product. When worker-tools is enabled, only bounded audit tools execute on the persistent VibeHacking runtime.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">AGENT 01</div>
+          <h3>VibeAgent · Discover</h3>
+          <p>Maps cloud edge, routes, APIs, schemas, headers, sessions, auth boundaries and exposed configuration, then follows evidence dynamically.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">AGENT 02</div>
+          <h3>BreakAgent · Validate</h3>
+          <p>Uses a narrower validation policy to re-check suspected weaknesses and label confirmed vs unconfirmed results without broad discovery noise.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">BACKEND 01</div>
+          <h3>Portable</h3>
+          <p>Serverless-friendly audit tools run directly in VibeAgent with bounded behavior, live SSE events and per-job request context.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">BACKEND 02</div>
+          <h3>VibeHacking worker-tools</h3>
+          <p>The standalone agent stays in control while compatible defensive tools execute remotely behind dual exact-host allowlists and ownership verification.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">EVIDENCE</div>
+          <h3>Canonical findings</h3>
+          <p>Findings carry severity, validation status, affected URL, evidence, remediation, CWE and OWASP metadata in one shared schema.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">WORKSPACE</div>
+          <h3>Runs · Findings · Reports</h3>
+          <p>Open <code>/app</code> to review persisted runs, aggregate findings, reopen threads and download JSON or SARIF reports.</p>
         </div>
       </div>
     </div>
@@ -267,10 +309,10 @@
           <ul>
             <li>Exact target URLs only</li>
             <li><strong>*.vercel.app</strong> allowed</li>
-            <li>App name + short ownership note</li>
-            <li>Strict rate limits</li>
-            <li>Expanded autonomous VibeAgent audit toolset</li>
-            <li>Evidence-based report</li>
+            <li>VibeAgent + BreakAgent modes</li>
+            <li>Portable autonomous execution</li>
+            <li>Expanded bounded audit toolset</li>
+            <li>Structured JSON + SARIF reports</li>
           </ul>
           <a href="/scan" class="btn btn-primary">Start Hobby scan</a>
         </div>
@@ -283,8 +325,8 @@
             <li>Company name + contacts</li>
             <li>Higher concurrency</li>
             <li>Emergency stop contact</li>
-            <li>Optional continuous mode</li>
-            <li>Priority support</li>
+            <li>Optional approved worker-tools backend</li>
+            <li>Exact-host ownership verification</li>
           </ul>
           <a href="/scan" class="btn btn-ghost">Start Enterprise scan</a>
         </div>
@@ -294,10 +336,11 @@
         <h3>Scope rules (non-negotiable)</h3>
         <p>VibeAgent never expands beyond the targets you type in.</p>
         <ul>
-          <li>No wildcards except the explicit Hobby allowance for <code>*.vercel.app</code></li>
-          <li>Load / stress tools stay double-gated</li>
-          <li>Every finding must beat a baseline control</li>
-          <li>Unauthorized use is prohibited and logged</li>
+          <li>Portable scope never expands beyond declared targets</li>
+          <li>Worker-tools requires exact server allowlists on both VibeAgent and VibeHacking</li>
+          <li>Worker-backed targets require a one-time <code>/.well-known/vibeagent-verification.txt</code> proof</li>
+          <li>Private invite codes are validated only on the server; no access secret is embedded in the site</li>
+          <li>Cross-origin scan and report access is blocked at the API boundary</li>
         </ul>
       </div>
 

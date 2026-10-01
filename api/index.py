@@ -11,9 +11,11 @@ class handler(BaseHTTPRequestHandler):
             "routes": [
                 "GET  /api",
                 "GET  /api/capabilities",
+                "POST /api/verify_target  (native target ownership)",
                 "POST /api/scan",
                 "POST /api/stream  (SSE live events)",
                 "GET  /api/job?id=",
+                "GET  /api/jobs?include=findings",
                 "GET  /api/report?id=&format=json|sarif",
                 "POST /api/waitlist",
             ],

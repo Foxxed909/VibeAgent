@@ -42,25 +42,25 @@
     .error { color: var(--danger); font-size: 0.9rem; margin-bottom: 12px; }
     .success { color: var(--accent); font-size: 0.9rem; margin-top: 16px; }
     .back { display: inline-block; margin-bottom: 24px; color: var(--text-muted); font-size: 0.9rem; }
-    .trial-box {
-      background: var(--accent-dim); border: 1px solid rgba(34,197,94,0.3);
-      border-radius: 8px; padding: 14px 16px; margin-bottom: 24px; font-size: 0.9rem;
+    .verify-box {
+      display:none; background:var(--accent-dim); border:1px solid rgba(34,197,94,0.28);
+      border-radius:8px; padding:14px 16px; margin:-6px 0 20px; font-size:0.85rem;
     }
-    .trial-box code { font-family: var(--mono); font-size: 0.8rem; word-break: break-all; }
+    .verify-box code { font-family:var(--mono); word-break:break-all; color:var(--accent); }
+    .verify-actions { display:flex; gap:8px; margin-top:12px; }
+    .verify-actions button {
+      flex:1; padding:9px 10px; border-radius:7px; border:1px solid var(--border);
+      background:#111; color:var(--text); cursor:pointer; font-weight:600;
+    }
     .check { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 18px; font-size: 0.85rem; color: var(--text-muted); }
     .check input { width: auto; margin: 4px 0 0; }
   </style>
 </head>
 <body>
   <div class="container">
-    <a class="back" href="/">← VibeAgent</a>
+    <a class="back" href="/app">← Workspace</a>
     <h1>Start a scan</h1>
     <p class="sub">Exact targets only. Live agent stream opens as soon as you launch.</p>
-
-    <div class="trial-box">
-      <strong>Trial / friends access</strong><br/>
-      Code: <code>9954FA-67£54CD-GROKJAILEDBROKE£D</code>
-    </div>
 
     <label>Agent</label>
     <div class="agent-toggle">
@@ -75,8 +75,9 @@
     </div>
 
     <form id="scan-form">
-      <label for="access_code">Access code (optional)</label>
-      <input id="access_code" name="access_code" placeholder="9954FA-67£54CD-GROKJAILEDBROKE£D" autocomplete="off" />
+      <label for="access_code">Private invite code (optional)</label>
+      <input id="access_code" name="access_code" placeholder="Enter a private invite if you have one" autocomplete="off" />
+      <p class="hint">Invite codes are private and validated only on the server.</p>
 
       <div id="hobby-fields">
         <label for="app_name">App / project name</label>
@@ -102,14 +103,28 @@
         <option value="worker-tools" id="worker-tools-option" disabled>VibeHacking worker · autonomous tools</option>
       </select>
       <p class="hint" id="backend-hint">Portable mode uses the bounded serverless tool implementations.</p>
+      <div class="verify-box" id="verify-box">
+        <strong>Verify ownership for VibeHacking worker-tools</strong>
+        <p id="verify-message" style="margin-top:6px;color:var(--text-muted)">
+          This exact host is approved by the worker policy but still needs proof of control.
+        </p>
+        <div id="verify-challenge" style="display:none;margin-top:10px">
+          Put this exact token at <code>/.well-known/vibeagent-verification.txt</code>:
+          <div><code id="verify-token"></code></div>
+        </div>
+        <div class="verify-actions">
+          <button type="button" id="create-verify">Create challenge</button>
+          <button type="button" id="confirm-verify">Confirm verification</button>
+        </div>
+      </div>
 
       <label for="depth">Depth</label>
       <select id="depth" name="depth">
         <option value="quick">Quick — ~4 rounds</option>
         <option value="standard" selected>Standard — 12 rounds</option>
-        <option value="deep" id="depth-deep">Deep — 15 rounds (Enterprise / trial)</option>
+        <option value="deep" id="depth-deep">Deep — 15 rounds (Enterprise / private invite)</option>
       </select>
-      <p class="hint">Hobby without trial code: Quick + Standard only.</p>
+      <p class="hint">Hobby without a private invite: Quick + Standard only.</p>
 
       <label for="stress">Authorized stress</label>
       <select id="stress" name="stress">
@@ -119,7 +134,7 @@
         <option value="20">x20</option>
         <option value="50" id="stress-50" disabled>x50 (Enterprise org-managed)</option>
       </select>
-      <p class="hint">Requires Enterprise or trial code. Default mode is platform-capped.</p>
+      <p class="hint">Requires Enterprise or a valid private invite. Default mode is platform-capped.</p>
 
       <div id="stress-mode-wrap" class="enterprise-only">
         <label class="check">
@@ -143,7 +158,6 @@
 
   <script>
     const CONFIRM = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS";
-    const TRIAL_CODE = "9954FA-67£54CD-GROKJAILEDBROKE£D";
     let tier = "hobby";
     let agentMode = "vibe";
     const vibeBtn = document.querySelector('[data-agent="vibe"]');
@@ -153,6 +167,10 @@
     const backendSelect = document.getElementById("execution_backend");
     const workerToolsOption = document.getElementById("worker-tools-option");
     const backendHint = document.getElementById("backend-hint");
+    const verifyBox = document.getElementById("verify-box");
+    const verifyMessage = document.getElementById("verify-message");
+    const verifyChallenge = document.getElementById("verify-challenge");
+    const verifyToken = document.getElementById("verify-token");
     let capabilityTimer = null;
 
     function updateStressState() {
@@ -172,6 +190,7 @@
       workerToolsOption.disabled = true;
       if (targets.length !== 1) {
         if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
+        verifyBox.style.display = "none";
         backendHint.textContent = targets.length > 1
           ? "VibeHacking worker tools currently require exactly one server-approved target per job."
           : "Portable mode uses the bounded serverless tool implementations.";
@@ -186,15 +205,20 @@
         const data = await res.json();
         const worker = data.worker_tools || {};
         workerToolsOption.disabled = !worker.can_launch;
+        verifyBox.style.display = worker.allowlisted && !worker.ownership_verified ? "block" : "none";
         if (worker.can_launch) {
-          backendHint.textContent = "VibeHacking worker tools are available for this exact approved target" +
+          backendHint.textContent = "VibeHacking worker tools are available for this verified exact target" +
             (worker.tool_count ? " · " + worker.tool_count + " native tools" : "") + ".";
+        } else if (worker.allowlisted && !worker.ownership_verified) {
+          if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
+          backendHint.textContent = "Worker-tools is allowlisted, but ownership verification is required.";
         } else {
           if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
           backendHint.textContent = worker.message || "VibeHacking worker tools are not available for this target.";
         }
       } catch {
         if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
+        verifyBox.style.display = "none";
         backendHint.textContent = "Could not verify VibeHacking worker tools; using portable mode.";
       }
       updateStressState();
@@ -250,6 +274,41 @@
     };
     document.getElementById("targets").addEventListener("input", queueCapabilityRefresh);
 
+    async function verificationRequest(action) {
+      const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
+      if (targets.length !== 1) {
+        verifyMessage.textContent = "Enter exactly one target first.";
+        return;
+      }
+      verifyMessage.textContent = action === "challenge" ? "Creating challenge…" : "Checking verification file…";
+      try {
+        const res = await fetch("/api/verify_target", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: targets[0], action }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          verifyMessage.textContent = data.error || "Verification failed.";
+          return;
+        }
+        if (action === "challenge") {
+          verifyToken.textContent = data.token || "";
+          verifyChallenge.style.display = "block";
+          verifyMessage.textContent = "Challenge created. Publish the token, then tap Confirm verification.";
+        } else {
+          verifyMessage.textContent = "Ownership verified. Worker-tools is now available for this host.";
+          verifyChallenge.style.display = "none";
+          await refreshWorkerAvailability();
+        }
+      } catch {
+        verifyMessage.textContent = "Could not reach the verification service.";
+      }
+    }
+
+    document.getElementById("create-verify").onclick = () => verificationRequest("challenge");
+    document.getElementById("confirm-verify").onclick = () => verificationRequest("confirm");
+
     document.getElementById("scan-form").onsubmit = (e) => {
       e.preventDefault();
       const err = document.getElementById("error");
@@ -257,10 +316,7 @@
       err.hidden = true; ok.hidden = true;
 
       const accessCode = document.getElementById("access_code").value.trim();
-      const isTrial = accessCode === TRIAL_CODE;
-      if (accessCode && !isTrial) {
-        err.textContent = "Invalid access code."; err.hidden = false; return;
-      }
+      const hasInvite = Boolean(accessCode);
       const confirm = document.getElementById("confirm").value.trim();
       if (confirm !== CONFIRM) {
         err.textContent = "Confirmation phrase does not match."; err.hidden = false; return;
@@ -268,9 +324,9 @@
       const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
       if (!targets.length) { err.textContent = "Add at least one target."; err.hidden = false; return; }
 
-      const effectiveTier = isTrial ? "hobby" : tier;
+      const effectiveTier = tier;
       let depth = document.getElementById("depth").value || "standard";
-      if (effectiveTier === "hobby" && !isTrial && depth === "deep") {
+      if (effectiveTier === "hobby" && !hasInvite && depth === "deep") {
         depth = "standard";
       }
 
@@ -290,8 +346,7 @@
         tier: effectiveTier,
         targets,
         confirmation: confirm,
-        access_code: isTrial ? accessCode : null,
-        trial: isTrial,
+        access_code: accessCode || null,
         app_name: document.getElementById("app_name").value.trim(),
         company_name: document.getElementById("company_name").value.trim(),
         contact_email: document.getElementById("contact_email").value.trim(),
@@ -301,8 +356,8 @@
         stress_mode: stressOrg ? "org" : "capped",
         cookie: document.getElementById("cookie").value.trim() || null,
       };
-      if (payload.stress_multiplier && !(isTrial || effectiveTier === "enterprise")) {
-        err.textContent = "Stress requires Enterprise or trial code."; err.hidden = false; return;
+      if (payload.stress_multiplier && !(hasInvite || effectiveTier === "enterprise")) {
+        err.textContent = "Stress requires Enterprise or a valid private invite."; err.hidden = false; return;
       }
 
       const btn = document.getElementById("submit");

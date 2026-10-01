@@ -1,7 +1,6 @@
 """Lightweight HTTP probes for Vercel (no VibeHacking checkout required)."""
 from __future__ import annotations
 
-import os
 import re
 import ssl
 import urllib.error
@@ -10,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 from .cf_detect import challenge_advice, is_challenge_page
+from .request_context import current_cookie
 
 UA = "VibeAgent/0.2 (+authorized-scan)"
 
@@ -53,7 +53,7 @@ SECRET_MARKERS = (
 
 def _extra_headers() -> Dict[str, str]:
     h: Dict[str, str] = {}
-    cookie = os.environ.get("VIBEAGENT_COOKIE", "").strip()
+    cookie = current_cookie()
     if cookie:
         h["Cookie"] = cookie
     return h
