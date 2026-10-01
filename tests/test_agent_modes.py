@@ -55,7 +55,8 @@ class AgentModeTests(unittest.TestCase):
             report = run_job(auth, dry_run=True, agent_mode="vibe", execution_backend="native-worker")
         self.assertEqual("native-worker", report["execution_backend"])
         self.assertEqual(["native-worker-managed"], report["available_tools"])
-        self.assertTrue(report["native_worker_capabilities"]["can_launch"])
+        self.assertFalse(report["native_worker_capabilities"]["can_launch"])
+        self.assertFalse(report["native_worker_capabilities"]["ownership_verified"])
 
     def test_native_worker_filters_shared_findings_to_exact_target(self):
         auth = Authorization(
