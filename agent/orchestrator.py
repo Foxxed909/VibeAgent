@@ -24,6 +24,8 @@ from .worker_client import (
     run_remote_audit_tool,
     target_host,
 )
+from .target_verification import is_target_verified
+from .request_context import reset_cookie, set_cookie
 from . import job_store as _job_store
 
 try:
@@ -64,6 +66,39 @@ def run_job(
     agent_mode: str = "vibe",
     execution_backend: str = "portable",
 ) -> Dict[str, Any]:
+    cookie_token = set_cookie(cookie)
+    try:
+        return _run_job_impl(
+            auth,
+            dry_run=dry_run,
+            model=model,
+            on_event=on_event,
+            job_id=job_id,
+            depth=depth,
+            stress_multiplier=stress_multiplier,
+            stress_mode=stress_mode,
+            cookie=cookie,
+            agent_mode=agent_mode,
+            execution_backend=execution_backend,
+        )
+    finally:
+        reset_cookie(cookie_token)
+
+
+def _run_job_impl(
+    auth: Authorization,
+    *,
+    dry_run: bool = False,
+    model: Optional[str] = None,
+    on_event: EventCb = None,
+    job_id: Optional[str] = None,
+    depth: str = "standard",
+    stress_multiplier: Optional[int] = None,
+    stress_mode: str = "capped",
+    cookie: Optional[str] = None,
+    agent_mode: str = "vibe",
+    execution_backend: str = "portable",
+) -> Dict[str, Any]:
     auth = auth.validated()
     trial = is_valid_trial_code(auth.access_code)
     job_id = job_id or str(uuid.uuid4())[:12]
@@ -75,9 +110,20 @@ def run_job(
     if execution_backend not in {"portable", "worker-tools", "native-worker"}:
         execution_backend = "portable"
 
+    verified_targets = {
+        target: is_target_verified(target)
+        for target in auth.targets
+    } if execution_backend in {"worker-tools", "native-worker"} else {}
+
     worker_tools = set()
     worker_warning = None
     if execution_backend == "worker-tools":
+        if not dry_run:
+            unverified = [target for target, ok in verified_targets.items() if not ok]
+            if unverified:
+                raise WorkerError(
+                    "worker-tools target ownership is not verified; complete the /.well-known/vibeagent-verification.txt challenge first"
+                )
         caps = remote_audit_capabilities(auth.targets)
         if not caps.get("can_launch"):
             raise WorkerError(str(caps.get("message") or "VibeHacking audit-tool bridge is unavailable"))
@@ -88,9 +134,6 @@ def run_job(
         }
         if not worker_tools:
             raise WorkerError("VibeHacking worker has no compatible audit tools for this agent mode.")
-    if cookie:
-        os.environ["VIBEAGENT_COOKIE"] = cookie
-
     report: Dict[str, Any] = {
         "job_id": job_id,
         "tier": auth.tier,
@@ -119,6 +162,7 @@ def run_job(
         "execution_backend": execution_backend,
         "worker_tools": sorted(worker_tools),
         "worker_warning": worker_warning,
+        "ownership_verified": verified_targets,
         "native_worker": None,
     }
 
@@ -147,9 +191,16 @@ def run_job(
         ]
         if execution_backend == "native-worker":
             report["native_worker_capabilities"] = native_worker_capabilities(auth.targets, agent_mode=agent_mode)
+            all_verified = bool(auth.targets) and all(verified_targets.values())
+            report["native_worker_capabilities"]["ownership_verified"] = all_verified
+            report["native_worker_capabilities"]["can_launch"] = bool(
+                report["native_worker_capabilities"].get("can_launch")
+            ) and all_verified
         elif execution_backend == "worker-tools":
+            all_verified = bool(auth.targets) and all(verified_targets.values())
             report["worker_tool_capabilities"] = {
-                "can_launch": True,
+                "can_launch": all_verified,
+                "ownership_verified": all_verified,
                 "remote_tools": sorted(worker_tools),
             }
         report["status"] = "dry_run_ok"
@@ -374,6 +425,10 @@ def _run_native_worker_job(
         raise WorkerError("native-worker backend currently requires exactly one target per job")
 
     target = auth.targets[0]
+    if not is_target_verified(target):
+        raise WorkerError(
+            "native-worker target ownership is not verified; complete the /.well-known/vibeagent-verification.txt challenge first"
+        )
     caps = native_worker_capabilities(auth.targets, agent_mode=agent_mode)
     if not caps.get("can_launch"):
         rejected = caps.get("rejected_targets") or []
