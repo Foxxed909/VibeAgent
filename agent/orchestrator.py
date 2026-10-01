@@ -13,7 +13,7 @@ from urllib.parse import urljoin
 
 from .models import chat, OpenRouterError
 from .scope import Authorization, ScopeError, assert_url_in_scope, CONFIRM_PHRASE, is_valid_trial_code
-from .tools_catalog import get_tool_catalog, SYSTEM_PROMPT
+from .tools_catalog import (agent_name, get_forced_tools, get_system_prompt, get_tool_catalog, normalize_agent_mode)
 from .depth import get_depth, DepthProfile
 from . import job_store as _job_store
 
@@ -85,7 +85,7 @@ def run_job(
         report["events"].append(ev)
         _emit(on_event, ev)
 
-    emit("auth_ok", tier=auth.tier, trial=trial, targets=auth.targets, depth=profile.name)
+    emit("auth_ok", tier=auth.tier, trial=trial, targets=auth.targets, depth=profile.name, agent_mode=agent_mode, agent_name=active_agent)
 
     if dry_run:
         report["plan"] = [
@@ -117,24 +117,31 @@ def run_job(
                 report["errors"].append(f"Stress failed: {e}")
                 emit("error", text=str(e))
 
+    if agent_mode == "break":
+        mission = (
+            "Validate likely weaknesses with targeted evidence. Re-check headers, CORS, session policy, "
+            "authorization boundaries and exposed config/schema surfaces. Do not invent bypasses. "
+            "End with ## Findings and mark each result confirmed or unconfirmed."
+        )
+    else:
+        mission = (
+            "Map the authorized surface, run recon/API discovery, follow evidence, and end with ## Findings. "
+            "Challenges are informational, not downtime."
+        )
     user_brief = (
-        f"Authorization accepted.\nTier: {auth.tier}\nTrial: {trial}\n"
+        f"Authorization accepted.\nAgent: {active_agent}\nTier: {auth.tier}\nTrial: {trial}\n"
         f"Depth: {profile.name} (up to {profile.max_rounds} rounds)\n"
         f"Targets: {json.dumps(auth.targets)}\n"
         f"App/Company: {auth.app_name or auth.company_name}\n"
-        f"MUST: recon, api_finder + follow-up, ghost/senoria, never quit on soft fail/challenge, "
-        f"end with ## Findings. Challenges are informational, not downtime."
+        f"Mission: {mission}"
     )
     messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": get_system_prompt(agent_mode)},
         {"role": "user", "content": user_brief},
     ]
-    emit("agent_message", text=f"Starting {profile.name} assessment ({profile.max_rounds} max rounds).")
+    emit("agent_message", text=f"{active_agent} starting {profile.name} assessment ({profile.max_rounds} max rounds).")
 
-    forced_tools = ["cloud_scout", "ash", "vibe_headers"]
-    if profile.force_api_finder:
-        forced_tools.append("api_finder")
-    forced_tools.extend(["openapi_scout", "ghost", "senoria"])
+    forced_tools = get_forced_tools(agent_mode, force_api_finder=profile.force_api_finder)
 
     for target in auth.targets:
         base = target if "://" in target else f"https://{target}"
@@ -160,7 +167,7 @@ def run_job(
     messages.append({
         "role": "user",
         "content": (
-            "Forced recon results follow. Continue with extra in-scope probes if useful, "
+            f"{active_agent} baseline results follow. Continue with extra in-scope probes if useful, "
             "then write final ## Findings. Do not give up on challenges.\n\n"
             + "\n\n".join(tool_digest[:20])
         ),
@@ -234,7 +241,7 @@ def run_job(
         messages.append({
             "role": "user",
             "content": (
-                "Write the final report with a ## Findings section. "
+                f"Write the final {active_agent} report with a ## Findings section. "
                 "Severity, evidence, URL, fix hints. Challenges are informational."
             ),
         })
