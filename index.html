@@ -234,7 +234,7 @@
         <div class="step">
           <div class="step-num">01</div>
           <h3>Declare exact targets</h3>
-          <p>Paste hosts, URLs, or (Enterprise) IP ranges. Hobby is limited to exact URLs and <code>*.vercel.app</code>.</p>
+          <p>Paste hosts, URLs, or (Enterprise) IP ranges. Hobby uses exact URLs/hosts only, including exact Vercel app hostnames.</p>
         </div>
         <div class="step">
           <div class="step-num">02</div>
@@ -308,7 +308,7 @@
           <p class="tier-desc">For indie builders, friends, and side projects.</p>
           <ul>
             <li>Exact target URLs only</li>
-            <li><strong>*.vercel.app</strong> allowed</li>
+            <li>Exact Vercel app hostnames allowed</li>
             <li>VibeAgent + BreakAgent modes</li>
             <li>Portable autonomous execution</li>
             <li>Expanded bounded audit toolset</li>
@@ -336,7 +336,7 @@
         <h3>Scope rules (non-negotiable)</h3>
         <p>VibeAgent never expands beyond the targets you type in.</p>
         <ul>
-          <li>Portable scope never expands beyond declared targets</li>
+          <li>Portable scope never expands beyond the declared hostname; subdomains must be listed separately</li>
           <li>Worker-tools requires exact server allowlists on both VibeAgent and VibeHacking</li>
           <li>Worker-backed targets require a one-time <code>/.well-known/vibeagent-verification.txt</code> proof</li>
           <li>Private invite codes are validated only on the server; no access secret is embedded in the site</li>

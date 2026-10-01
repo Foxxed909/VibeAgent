@@ -1,6 +1,6 @@
 """Exact-target scope enforcement.
 
-Hobby: exact URLs/hosts + *.vercel.app only.
+Hobby: exact URLs/hosts only, including exact *.vercel.app hostnames.
 Enterprise: exact hosts, URLs, IP/CIDR ranges.
 
 An optional private invite code can unlock Hobby features when its SHA-256 digest is configured server-side.
@@ -19,7 +19,8 @@ from urllib.parse import urlparse
 CONFIRM_PHRASE = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS"
 
 # Optional private invite code. Store only its SHA-256 digest server-side.
-TRIAL_CODE_SHA256_ENV = "VIBE_AGENT_TRIAL_CODE_SHA256"
+INVITE_CODE_SHA256_ENV = "VIBE_AGENT_INVITE_CODE_SHA256"
+LEGACY_TRIAL_CODE_SHA256_ENV = "VIBE_AGENT_TRIAL_CODE_SHA256"
 
 
 @dataclass
@@ -42,6 +43,8 @@ class Authorization:
             raise ScopeError("At least one exact target is required.")
 
         trial = is_valid_trial_code(self.access_code)
+        if self.access_code and not trial:
+            raise ScopeError("Invalid private invite code.")
         if trial:
             # Trial always runs as Hobby scope rules
             self.tier = "hobby"
@@ -54,7 +57,7 @@ class Authorization:
             if self.tier == "hobby":
                 if not is_hobby_allowed(t):
                     raise ScopeError(
-                        f"Hobby tier only allows exact URLs/hosts and *.vercel.app. Rejected: {raw}"
+                        f"Hobby tier only allows exact URLs/hosts. Rejected: {raw}"
                     )
             normalized.append(t)
         self.targets = normalized
@@ -72,7 +75,11 @@ class ScopeError(ValueError):
 
 def is_valid_trial_code(code: Optional[str]) -> bool:
     supplied = (code or "").strip()
-    expected = (os.environ.get(TRIAL_CODE_SHA256_ENV) or "").strip().lower()
+    expected = (
+        os.environ.get(INVITE_CODE_SHA256_ENV)
+        or os.environ.get(LEGACY_TRIAL_CODE_SHA256_ENV)
+        or ""
+    ).strip().lower()
     if not supplied or not re.fullmatch(r"[0-9a-f]{64}", expected):
         return False
     digest = hashlib.sha256(supplied.encode("utf-8")).hexdigest()
@@ -83,20 +90,14 @@ def normalize_target(raw: str) -> str:
     raw = (raw or "").strip()
     if not raw or raw.startswith("#"):
         return ""
-    if "*" in raw and not raw.endswith(".vercel.app") and raw != "*.vercel.app":
-        return ""
-    if raw.startswith("*.") and not raw.endswith(".vercel.app"):
+    if "*" in raw:
         return ""
     return raw.rstrip("/")
 
 
 def is_hobby_allowed(target: str) -> bool:
-    """Exact host/URL or *.vercel.app / something.vercel.app."""
+    """Exact host/URL only. Exact Vercel app hostnames are allowed."""
     t = target.lower()
-    if t == "*.vercel.app":
-        return True
-    if t.endswith(".vercel.app") and "*" not in t:
-        return True
     if "*" in t or "?" in t:
         return False
     if "://" in t:
@@ -118,10 +119,6 @@ def host_in_scope(host: str, auth: Authorization) -> bool:
         return False
     for target in auth.targets:
         t = target.lower()
-        if t == "*.vercel.app":
-            if host.endswith(".vercel.app") or host == "vercel.app":
-                return True
-            continue
         if "://" in t:
             try:
                 th = urlparse(t).hostname or ""
@@ -129,7 +126,7 @@ def host_in_scope(host: str, auth: Authorization) -> bool:
                 th = ""
         else:
             th = t.split("/")[0].split(":")[0]
-        if host == th or host.endswith("." + th):
+        if host == th:
             return True
         if auth.tier == "enterprise" and "/" in t:
             try:
