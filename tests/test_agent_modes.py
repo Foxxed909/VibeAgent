@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import unittest
+from unittest.mock import patch
 
 from agent.orchestrator import run_job
 from agent.scope import Authorization, CONFIRM_PHRASE
@@ -36,6 +38,24 @@ class AgentModeTests(unittest.TestCase):
         self.assertEqual("BreakAgent", report["agent_name"])
         self.assertIn("corscan", report["available_tools"])
         self.assertNotIn("bot_breaker", report["available_tools"])
+        self.assertEqual("portable", report["execution_backend"])
+
+    def test_native_worker_dry_run_records_backend_without_network(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["https://demo.vercel.app"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Demo",
+        )
+        with patch.dict(os.environ, {
+            "VIBE_AGENT_WORKER_URL": "https://worker.example.com",
+            "VIBE_AGENT_WORKER_TOKEN": "x" * 32,
+            "VIBE_AGENT_WORKER_ALLOWED_HOSTS": "demo.vercel.app",
+        }, clear=False):
+            report = run_job(auth, dry_run=True, agent_mode="vibe", execution_backend="native-worker")
+        self.assertEqual("native-worker", report["execution_backend"])
+        self.assertEqual(["native-worker-managed"], report["available_tools"])
+        self.assertTrue(report["native_worker_capabilities"]["can_launch"])
 
     def test_breakagent_forced_sequence_is_targeted(self):
         tools = get_forced_tools("break", force_api_finder=True)
