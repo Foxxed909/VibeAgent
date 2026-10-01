@@ -52,11 +52,15 @@ def run_job(
     stress_multiplier: Optional[int] = None,
     stress_mode: str = "capped",
     cookie: Optional[str] = None,
+    agent_mode: str = "vibe",
 ) -> Dict[str, Any]:
     auth = auth.validated()
     trial = is_valid_trial_code(auth.access_code)
     job_id = job_id or str(uuid.uuid4())[:12]
     profile = get_depth(depth)
+    agent_mode = normalize_agent_mode(agent_mode)
+    active_agent = agent_name(agent_mode)
+    tool_catalog = get_tool_catalog(native=bool(VIBEHACKING_ROOT), agent_mode=agent_mode)
     if cookie:
         os.environ["VIBEAGENT_COOKIE"] = cookie
 
@@ -78,6 +82,9 @@ def run_job(
         "events": [],
         "report_text": None,
         "stress": None,
+        "agent_mode": agent_mode,
+        "agent_name": active_agent,
+        "available_tools": [t["function"]["name"] for t in tool_catalog],
     }
 
     def emit(kind: str, **kwargs: Any) -> None:
