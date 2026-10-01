@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Workspace — VibeAgent</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:#050505; --elev:#0d0d0d; --elev2:#111; --border:#1f1f1f;
+      --text:#fafafa; --muted:#a1a1aa; --accent:#22c55e; --info:#60a5fa;
+      --warn:#f59e0b; --danger:#ef4444; --mono:"JetBrains Mono",monospace;
+      --font:Inter,system-ui,sans-serif;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh}
+    a{color:inherit;text-decoration:none}
+    header{position:sticky;top:0;z-index:20;background:rgba(5,5,5,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
+    .bar{max-width:1180px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+    .brand{font-weight:800;letter-spacing:-.03em}.brand span{color:var(--accent)}
+    .spacer{flex:1}.btn{border:1px solid var(--border);border-radius:8px;padding:9px 13px;background:#111;color:var(--text);font-weight:600;cursor:pointer}
+    .btn.primary{background:var(--accent);border-color:var(--accent);color:#000}
+    main{max-width:1180px;margin:0 auto;padding:32px 20px 64px}
+    .hero{display:flex;align-items:end;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:26px}
+    h1{font-size:2rem;letter-spacing:-.04em}.sub{color:var(--muted);margin-top:6px}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:12px;margin-bottom:24px}
+    .stat{background:var(--elev);border:1px solid var(--border);border-radius:12px;padding:16px}
+    .stat b{display:block;font-size:1.45rem}.stat span{color:var(--muted);font-size:.8rem}
+    .tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);margin-bottom:18px;overflow:auto}
+    .tab{padding:10px 14px;border:none;background:none;color:var(--muted);font-weight:700;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+    .tab.active{color:var(--text);border-color:var(--accent)}
+    .panel{display:none}.panel.active{display:block}
+    .card{background:var(--elev);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px}
+    .run-head,.finding-head,.report-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .title{font-weight:700}.mono{font-family:var(--mono);font-size:.76rem;color:var(--muted)}
+    .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    .pill{font-size:.72rem;padding:3px 8px;border-radius:999px;background:#171717;color:var(--muted);border:1px solid #272727}
+    .pill.green{color:#86efac;background:rgba(34,197,94,.1)}.pill.red{color:#fca5a5;background:rgba(239,68,68,.1)}
+    .pill.orange{color:#fcd34d;background:rgba(245,158,11,.1)}.pill.blue{color:#93c5fd;background:rgba(59,130,246,.1)}
+    .actions{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap}.actions a{font-size:.78rem;padding:6px 9px;border:1px solid var(--border);border-radius:7px;color:var(--muted)}
+    .actions a:hover{color:var(--text);border-color:#333}
+    .evidence{margin-top:10px;color:var(--muted);font-size:.88rem;white-space:pre-wrap;word-break:break-word}
+    .empty{padding:50px 20px;text-align:center;color:var(--muted);border:1px dashed var(--border);border-radius:12px}
+    .error{color:#fca5a5}
+    @media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}.actions{margin-left:0;width:100%}}
+  </style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <a class="brand" href="/">Vibe<span>Agent</span></a>
+    <span class="pill green">workspace</span>
+    <span class="spacer"></span>
+    <button class="btn" id="refresh">Refresh</button>
+    <a class="btn primary" href="/scan">New scan</a>
+  </div>
+</header>
+<main>
+  <section class="hero">
+    <div>
+      <h1>Security workspace</h1>
+      <p class="sub">Runs, findings and exportable reports across VibeAgent and BreakAgent.</p>
+    </div>
+    <div class="mono" id="store-label">loading store…</div>
+  </section>
+
+  <section class="stats">
+    <div class="stat"><b id="stat-runs">—</b><span>Recent runs</span></div>
+    <div class="stat"><b id="stat-findings">—</b><span>Total findings</span></div>
+    <div class="stat"><b id="stat-high">—</b><span>Critical + high</span></div>
+    <div class="stat"><b id="stat-agents">—</b><span>Agent modes used</span></div>
+  </section>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="runs">Runs</button>
+    <button class="tab" data-tab="findings">Findings</button>
+    <button class="tab" data-tab="reports">Reports</button>
+  </div>
+
+  <section class="panel active" id="panel-runs"></section>
+  <section class="panel" id="panel-findings"></section>
+  <section class="panel" id="panel-reports"></section>
+</main>
+
+<script>
+  const panels = {
+    runs: document.getElementById('panel-runs'),
+    findings: document.getElementById('panel-findings'),
+    reports: document.getElementById('panel-reports'),
+  };
+  let jobs = [];
+
+  function esc(v) {
+    return String(v == null ? '' : v)
+      .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
+      .replaceAll('"','&quot;').replaceAll("'","&#039;");
+  }
+
+  function pill(text, cls='') {
+    return '<span class="pill ' + cls + '">' + esc(text) + '</span>';
+  }
+
+  function severityClass(sev) {
+    sev = String(sev || '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return 'red';
+    if (sev === 'medium') return 'orange';
+    if (sev === 'low' || sev === 'info') return 'blue';
+    return '';
+  }
+
+  function selectTab(name) {
+    document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.tab === name));
+    Object.entries(panels).forEach(([k, el]) => el.classList.toggle('active', k === name));
+  }
+  document.querySelectorAll('.tab').forEach(el => el.onclick = () => selectTab(el.dataset.tab));
+
+  function renderRuns() {
+    if (!jobs.length) {
+      panels.runs.innerHTML = '<div class="empty">No persisted runs yet. Start a scan to create the first workspace run.</div>';
+      return;
+    }
+    panels.runs.innerHTML = jobs.map(job => {
+      const s = job.summary || {};
+      const sev = s.severity || {};
+      const target = (job.targets || [])[0] || '—';
+      return '<article class="card">' +
+        '<div class="run-head"><div><div class="title">' + esc(job.agent_name || 'VibeAgent') + ' · ' + esc(job.app_name || job.company_name || target) + '</div>' +
+        '<div class="mono">' + esc(job.job_id) + ' · ' + esc(target) + '</div></div>' +
+        '<div class="actions"><a href="/thread?job=' + encodeURIComponent(job.job_id) + '">Open thread</a></div></div>' +
+        '<div class="meta">' +
+          pill(job.status || 'unknown', job.status === 'completed' ? 'green' : '') +
+          pill(job.execution_backend || 'portable', 'blue') +
+          pill(job.depth || 'standard') +
+          pill((s.total_findings || 0) + ' findings') +
+          (sev.critical ? pill(sev.critical + ' critical', 'red') : '') +
+          (sev.high ? pill(sev.high + ' high', 'red') : '') +
+        '</div></article>';
+    }).join('');
+  }
+
+  function flattenedFindings() {
+    const out = [];
+    for (const job of jobs) {
+      for (const finding of (job.findings || [])) out.push({ job, finding });
+    }
+    const rank = {critical:5,high:4,medium:3,low:2,info:1};
+    out.sort((a,b) => (rank[b.finding.severity]||0) - (rank[a.finding.severity]||0));
+    return out;
+  }
+
+  function renderFindings() {
+    const rows = flattenedFindings();
+    if (!rows.length) {
+      panels.findings.innerHTML = '<div class="empty">No structured findings in the recent persisted runs.</div>';
+      return;
+    }
+    panels.findings.innerHTML = rows.map(({job,finding:f}) =>
+      '<article class="card"><div class="finding-head"><div><div class="title">' + esc(f.title || 'Finding') + '</div>' +
+      '<div class="mono">' + esc(f.id || '') + ' · ' + esc(job.agent_name || '') + ' · ' + esc(job.job_id || '') + '</div></div>' +
+      '<div class="actions"><a href="/thread?job=' + encodeURIComponent(job.job_id) + '">Thread</a></div></div>' +
+      '<div class="meta">' + pill(f.severity || 'info', severityClass(f.severity)) +
+      pill(f.validation_status || 'unconfirmed') + (f.cwe ? pill(f.cwe) : '') + (f.owasp ? pill(f.owasp) : '') + '</div>' +
+      '<div class="evidence">' + esc(f.location || '') + (f.evidence ? '\n' + esc(f.evidence) : '') + '</div></article>'
+    ).join('');
+  }
+
+  function renderReports() {
+    if (!jobs.length) {
+      panels.reports.innerHTML = '<div class="empty">Completed persisted jobs will appear here with JSON and SARIF downloads.</div>';
+      return;
+    }
+    panels.reports.innerHTML = jobs.map(job => {
+      const id = encodeURIComponent(job.job_id || '');
+      return '<article class="card"><div class="report-head"><div><div class="title">' +
+        esc(job.agent_name || 'VibeAgent') + ' report</div><div class="mono">' + esc(job.job_id || '') +
+        ' · ' + esc(job.execution_backend || 'portable') + '</div></div>' +
+        '<div class="actions"><a href="/api/report?id=' + id + '&format=json">JSON</a>' +
+        '<a href="/api/report?id=' + id + '&format=sarif">SARIF</a>' +
+        '<a href="/thread?job=' + id + '">View</a></div></div></article>';
+    }).join('');
+  }
+
+  function renderStats() {
+    const findings = flattenedFindings();
+    const high = findings.filter(x => ['critical','high'].includes(String(x.finding.severity || '').toLowerCase())).length;
+    const modes = new Set(jobs.map(j => j.agent_name || j.agent_mode).filter(Boolean));
+    document.getElementById('stat-runs').textContent = jobs.length;
+    document.getElementById('stat-findings').textContent = findings.length;
+    document.getElementById('stat-high').textContent = high;
+    document.getElementById('stat-agents').textContent = modes.size;
+  }
+
+  async function load() {
+    Object.values(panels).forEach(p => p.innerHTML = '<div class="empty">Loading…</div>');
+    try {
+      const res = await fetch('/api/jobs?limit=40&include=findings');
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load jobs');
+      jobs = data.jobs || [];
+      document.getElementById('store-label').textContent = (data.store || 'unknown') + ' · ' + jobs.length + ' runs';
+      renderRuns(); renderFindings(); renderReports(); renderStats();
+    } catch (e) {
+      jobs = [];
+      document.getElementById('store-label').textContent = 'workspace unavailable';
+      Object.values(panels).forEach(p => p.innerHTML = '<div class="empty error">' + esc(e.message || e) + '</div>');
+      renderStats();
+    }
+  }
+
+  document.getElementById('refresh').onclick = load;
+  load();
+</script>
+</body>
+</html>
