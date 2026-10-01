@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from agent.findings import add_finding, finding_from_line, severity_counts
+from agent.findings import add_finding, finding_from_line, finding_from_native, severity_counts
 from agent.reporting import json_bytes, normalized_report, sarif_dict
 
 
@@ -36,6 +36,25 @@ class StructuredFindingTests(unittest.TestCase):
         self.assertTrue(add_finding(report, finding))
         self.assertFalse(add_finding(report, dict(finding)))
         self.assertEqual(1, len(report["findings"]))
+
+    def test_native_worker_finding_restores_authorized_host(self):
+        finding = finding_from_native(
+            {
+                "tool": "Leep",
+                "title": "Admin route reachable",
+                "severity": "high",
+                "location": "https://<host>/admin",
+                "evidence": "HTTP 200 without login boundary",
+                "recommendation": "Require server-side authorization.",
+                "cwe": "CWE-862",
+                "owasp": "A01:2021 - Broken Access Control",
+            },
+            default_tool="leep",
+            requested_url="https://demo.vercel.app",
+        )
+        self.assertEqual("https://demo.vercel.app/admin", finding["location"])
+        self.assertEqual("observed", finding["validation_status"])
+        self.assertEqual("CWE-862", finding["cwe"])
 
     def test_severity_counts(self):
         report = {"findings": [
