@@ -188,6 +188,86 @@ def verify_worker(cfg: Optional[WorkerConfig] = None) -> Dict[str, Any]:
     return _request(config, "/api/capabilities")
 
 
+def remote_audit_capabilities(
+    targets: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    """Resolve the bounded per-tool worker bridge without exposing the allowlist."""
+    cfg = get_worker_config()
+    if not cfg:
+        return {
+            "configured": False,
+            "can_launch": False,
+            "remote_tools": [],
+            "message": "VibeHacking worker is not configured.",
+        }
+
+    target_list = list(targets or [])
+    rejected = [t for t in target_list if not target_is_worker_allowed(t, cfg)]
+    if rejected:
+        return {
+            "configured": True,
+            "can_launch": False,
+            "remote_tools": [],
+            "rejected_targets": rejected,
+            "message": "Target hostname is not approved by the standalone worker allowlist.",
+        }
+
+    try:
+        caps = verify_worker(cfg)
+    except WorkerError as exc:
+        return {
+            "configured": True,
+            "can_launch": False,
+            "remote_tools": [],
+            "message": str(exc),
+        }
+
+    tools = [
+        str(name)
+        for name in (caps.get("remote_tools") or [])
+        if isinstance(name, str) and name.strip()
+    ]
+    bridge_configured = bool(caps.get("remote_tool_bridge_configured", tools))
+    return {
+        "configured": True,
+        "can_launch": bool(bridge_configured and tools),
+        "remote_tools": sorted(set(tools)),
+        "message": (
+            "Protected VibeHacking audit-tool bridge is ready."
+            if bridge_configured and tools
+            else "Worker is reachable but its remote audit bridge is not configured."
+        ),
+    }
+
+
+def run_remote_audit_tool(
+    target: str,
+    tool: str,
+    args: Optional[Dict[str, Any]] = None,
+    cfg: Optional[WorkerConfig] = None,
+) -> Dict[str, Any]:
+    """Run one allowlisted defensive audit tool on the persistent worker."""
+    config = cfg or get_worker_config()
+    if not config:
+        raise WorkerError("native worker is not configured")
+    if not target_is_worker_allowed(target, config):
+        raise WorkerError("target hostname is not in VIBE_AGENT_WORKER_ALLOWED_HOSTS")
+    if not tool or len(tool) > 80:
+        raise WorkerError("invalid remote tool name")
+    return _request(
+        config,
+        "/api/tools/run",
+        method="POST",
+        body={
+            "url": target,
+            "tool": tool,
+            "args": args or {},
+            "auth": WORKER_AUTH_PHRASE,
+        },
+        timeout=min(config.timeout_s, 60),
+    )
+
+
 def start_thread(target: str, agent_mode: str, cfg: Optional[WorkerConfig] = None) -> str:
     config = cfg or get_worker_config()
     if not config:
