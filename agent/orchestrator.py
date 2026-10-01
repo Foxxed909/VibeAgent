@@ -15,7 +15,8 @@ from .models import chat, OpenRouterError
 from .scope import Authorization, ScopeError, assert_url_in_scope, CONFIRM_PHRASE, is_valid_trial_code
 from .tools_catalog import (agent_name, get_forced_tools, get_system_prompt, get_tool_catalog, normalize_agent_mode)
 from .depth import get_depth, DepthProfile
-from .findings import add_finding, finding_from_line, severity_counts
+from .findings import add_finding, finding_from_line, finding_from_worker, severity_counts
+from .worker_client import WorkerError, native_worker_capabilities, run_native_target, target_host
 from . import job_store as _job_store
 
 try:
@@ -54,6 +55,7 @@ def run_job(
     stress_mode: str = "capped",
     cookie: Optional[str] = None,
     agent_mode: str = "vibe",
+    execution_backend: str = "portable",
 ) -> Dict[str, Any]:
     auth = auth.validated()
     trial = is_valid_trial_code(auth.access_code)
@@ -62,6 +64,9 @@ def run_job(
     agent_mode = normalize_agent_mode(agent_mode)
     active_agent = agent_name(agent_mode)
     tool_catalog = get_tool_catalog(native=bool(VIBEHACKING_ROOT), agent_mode=agent_mode)
+    execution_backend = (execution_backend or "portable").strip().lower()
+    if execution_backend not in {"portable", "native-worker"}:
+        execution_backend = "portable"
     if cookie:
         os.environ["VIBEAGENT_COOKIE"] = cookie
 
@@ -86,6 +91,8 @@ def run_job(
         "agent_mode": agent_mode,
         "agent_name": active_agent,
         "available_tools": [t["function"]["name"] for t in tool_catalog],
+        "execution_backend": execution_backend,
+        "native_worker": None,
     }
 
     def emit(kind: str, **kwargs: Any) -> None:
@@ -93,17 +100,32 @@ def run_job(
         report["events"].append(ev)
         _emit(on_event, ev)
 
-    emit("auth_ok", tier=auth.tier, trial=trial, targets=auth.targets, depth=profile.name, agent_mode=agent_mode, agent_name=active_agent)
+    emit(
+        "auth_ok",
+        tier=auth.tier,
+        trial=trial,
+        targets=auth.targets,
+        depth=profile.name,
+        agent_mode=agent_mode,
+        agent_name=active_agent,
+        execution_backend=execution_backend,
+    )
 
     if dry_run:
         report["plan"] = [
+            f"Execution backend: {execution_backend}",
             f"Depth: {profile.name} (max_rounds={profile.max_rounds})",
             f"Force api_finder={profile.force_api_finder}, follow_up={profile.follow_up_on_hits}",
             f"Retries={profile.tool_retries}, timeout={profile.tool_timeout_s}s",
         ]
+        if execution_backend == "native-worker":
+            report["native_worker_capabilities"] = native_worker_capabilities(auth.targets)
         report["status"] = "dry_run_ok"
         emit("done", status="dry_run_ok")
         return report
+
+    if execution_backend == "native-worker":
+        return _run_native_worker_job(auth, report, emit, agent_mode, active_agent)
 
     if stress_multiplier:
         if agent_mode == "break":
@@ -280,6 +302,123 @@ def run_job(
     return report
 
 
+def _emit_structured_finding(report: Dict[str, Any], emit, finding: Dict[str, Any]) -> None:
+    if not add_finding(report, finding):
+        return
+    emit(
+        "finding",
+        id=finding.get("id"),
+        title=finding.get("title"),
+        severity=finding.get("severity"),
+        validation_status=finding.get("validation_status"),
+        tool=finding.get("tool"),
+        location=finding.get("location"),
+        evidence=finding.get("evidence"),
+        recommendation=finding.get("recommendation"),
+        cwe=finding.get("cwe"),
+        owasp=finding.get("owasp"),
+        detail=finding.get("evidence"),
+    )
+
+
+def _run_native_worker_job(
+    auth: Authorization,
+    report: Dict[str, Any],
+    emit,
+    agent_mode: str,
+    active_agent: str,
+) -> Dict[str, Any]:
+    if len(auth.targets) != 1:
+        raise WorkerError("native-worker backend currently requires exactly one target per job")
+
+    target = auth.targets[0]
+    caps = native_worker_capabilities(auth.targets)
+    if not caps.get("can_launch"):
+        rejected = caps.get("rejected_targets") or []
+        if rejected:
+            raise WorkerError("target is not approved in VIBE_AGENT_WORKER_ALLOWED_HOSTS")
+        raise WorkerError(str(caps.get("message") or "native worker is unavailable"))
+
+    emit("agent_message", text=f"{active_agent} delegating approved target to protected native VibeHacking worker.")
+
+    def on_worker_event(event: Dict[str, Any]) -> None:
+        kind = str(event.get("kind") or "info").lower()
+        title = str(event.get("title") or "")
+        detail = str(event.get("detail") or "")
+        tool = str(event.get("tool") or "")
+        if kind == "tool_start":
+            emit("tool_start", tool=tool or title or "native-worker", args={"url": target, "native_worker": True})
+        elif kind == "tool_result":
+            emit("tool_result", tool=tool or "native-worker", ok=True, preview=(detail or title)[:2500])
+        elif kind == "break":
+            emit("agent_message", text=(title + ("\n" + detail if detail else ""))[:4000])
+        else:
+            emit("agent_message", text=(title + ("\n" + detail if detail else ""))[:4000])
+
+    state = run_native_target(target, agent_mode, on_worker_event=on_worker_event)
+    worker_model = state.get("model") or {}
+    if isinstance(worker_model, dict):
+        report["model"] = worker_model.get("id") or worker_model.get("name")
+    else:
+        report["model"] = str(worker_model or "") or None
+    report["provider"] = "vibehacking-worker"
+    report["reasoning_effort"] = "worker-managed"
+    report["native_worker"] = {
+        "thread_id": state.get("thread_id"),
+        "status": state.get("status"),
+        "verdict": state.get("verdict"),
+        "resilience_score": state.get("resilience_score"),
+        "confirmed_breaks": len(state.get("confirmed_breaks") or []),
+    }
+
+    expected_host = target_host(target)
+
+    # The upstream worker currently reads a shared structured-finding log.
+    # Accept only findings with an explicit full URL that resolves back to this exact target host.
+    for raw in state.get("findings") or []:
+        if not isinstance(raw, dict):
+            continue
+        location = str(raw.get("location") or raw.get("url") or "")
+        if not location or target_host(location) != expected_host:
+            continue
+        _emit_structured_finding(
+            report,
+            emit,
+            finding_from_worker(raw, default_url=target, confirmed=False),
+        )
+
+    # confirmed_breaks are stored inside the thread state itself, so they are thread-local.
+    for raw_break in state.get("confirmed_breaks") or []:
+        if not isinstance(raw_break, dict):
+            continue
+        worker_finding = {
+            "tool": raw_break.get("tool") or "native_worker",
+            "title": raw_break.get("summary") or "Native worker confirmed weakness",
+            "summary": raw_break.get("summary"),
+            "evidence": raw_break.get("evidence"),
+            "location": target,
+            "severity": "high",
+            "validation_status": "confirmed",
+        }
+        _emit_structured_finding(
+            report,
+            emit,
+            finding_from_worker(worker_finding, default_url=target, confirmed=True),
+        )
+
+    verdict = str(state.get("verdict") or "Native worker assessment completed.")
+    report["report_text"] = verdict + "\n\n" + _local_findings_fallback(report)
+    report["status"] = "completed"
+    report["summary"] = {
+        "total_findings": len(report["findings"]),
+        "severity": severity_counts(report),
+        "errors": len(report.get("errors") or []),
+    }
+    emit("agent_message", text=report["report_text"][:8000])
+    emit("done", status="completed", findings=len(report["findings"]), summary=report["summary"])
+    return report
+
+
 def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile) -> None:
     emit("tool_start", tool=name, args=args)
     last_err = None
@@ -360,21 +499,7 @@ def _harvest_findings(
         if not is_finding:
             continue
         finding = finding_from_line(name, line, url=url)
-        if add_finding(report, finding):
-            emit(
-                "finding",
-                id=finding.get("id"),
-                title=finding.get("title"),
-                severity=finding.get("severity"),
-                validation_status=finding.get("validation_status"),
-                tool=finding.get("tool"),
-                location=finding.get("location"),
-                evidence=finding.get("evidence"),
-                recommendation=finding.get("recommendation"),
-                cwe=finding.get("cwe"),
-                owasp=finding.get("owasp"),
-                detail=finding.get("evidence"),
-            )
+        _emit_structured_finding(report, emit, finding)
 
 
 def _local_findings_fallback(report: Dict[str, Any]) -> str:
