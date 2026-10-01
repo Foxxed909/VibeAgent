@@ -89,7 +89,9 @@ export VIBEHACKING_ROOT=/path/to/VibeHacking
 - [x] Agent-specific tool policies
 - [x] OpenAI + OpenRouter model paths
 - [x] Live SSE thread UI with agent identity
-- [x] `/api/scan`, `/api/stream`, `/api/job`
+- [x] Canonical structured findings with validation status, CWE/OWASP, evidence and remediation
+- [x] JSON + SARIF 2.1.0 report exports
+- [x] `/api/scan`, `/api/stream`, `/api/job`, `/api/report`
 - [x] Persistent cloud job store via Vercel KV / Upstash when configured
 - [x] Waitlist persistence via KV / Upstash when configured
 - [ ] Billing
