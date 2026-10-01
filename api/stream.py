@@ -58,6 +58,7 @@ class handler(BaseHTTPRequestHandler):
         cookie = (data.get("cookie") or "").strip() or None
         model = data.get("model") or None
         dry = bool(data.get("dry_run"))
+        agent_mode = data.get("agent_mode") or "vibe"
 
         # Start SSE
         self.send_response(200)
@@ -88,6 +89,7 @@ class handler(BaseHTTPRequestHandler):
                 stress_mode=stress_mode,
                 cookie=cookie,
                 on_event=on_event,
+                agent_mode=agent_mode,
             )
             try:
                 save_job(report)
