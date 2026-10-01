@@ -15,6 +15,7 @@ class handler(BaseHTTPRequestHandler):
                 "POST /api/scan",
                 "POST /api/stream  (SSE live events)",
                 "GET  /api/job?id=",
+                "GET  /api/jobs?include=findings",
                 "GET  /api/report?id=&format=json|sarif",
                 "POST /api/waitlist",
             ],
