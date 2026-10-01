@@ -13,6 +13,7 @@ class handler(BaseHTTPRequestHandler):
                 "POST /api/scan",
                 "POST /api/stream  (SSE live events)",
                 "GET  /api/job?id=",
+                "GET  /api/report?id=&format=json|sarif",
                 "POST /api/waitlist",
             ],
             "job_store": "Set KV_REST_API_URL + KV_REST_API_TOKEN for durable jobs",
