@@ -40,6 +40,7 @@ class handler(BaseHTTPRequestHandler):
         payload = json.dumps(body).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
         apply_cors(self)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
