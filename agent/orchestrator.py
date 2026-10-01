@@ -283,8 +283,8 @@ def run_job(
                     preview=(out or "")[:2500],
                 )
                 native_count = _harvest_native_findings(name, result, report, emit, args=args)
-            if not native_count:
-                _harvest_findings(name, out, report, emit, args=args)
+                if not native_count:
+                    _harvest_findings(name, out, report, emit, args=args)
                 messages.append({"role": "tool", "tool_call_id": tc_id, "content": (out or "")[:6000]})
             except ScopeError as e:
                 report["errors"].append(f"Scope violation blocked: {e}")
