@@ -39,11 +39,11 @@ I OWN OR AM AUTHORIZED TO TEST THESE TARGETS
 
 - [x] Landing page
 - [x] Authorization form + trial access code
-- [x] Agent orchestrator (multi-round tool loop)
+- [x] Agent orchestrator (multi-round tool loop)\n- [x] Expanded VibeAgent tool surface: cloud scout, spider, OpenAPI scout, CORS, session/cookie audit, auth-boundary audit, env/config audit
 - [x] OpenAI GPT-6 Luna / GPT-5.6 Luna + OpenRouter free models
 - [x] Live scan thread UI
 - [x] `/api/scan` + `/api/job`
-- [ ] Persistent cloud job store (currently `/tmp` on serverless)
+- [x] Persistent cloud job store via Vercel KV / Upstash when configured (filesystem fallback)
 - [ ] Billing
 
 ## Golden rule
