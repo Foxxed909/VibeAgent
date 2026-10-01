@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import re
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 
 TOOL_META = {
@@ -142,7 +143,7 @@ def finding_from_worker(
     if "://<host>" in location and default_url:
         try:
             base = default_url if "://" in default_url else "https://" + default_url
-            parsed = __import__("urllib.parse", fromlist=["urlsplit"]).urlsplit(base)
+            parsed = urlsplit(base)
             suffix = location.split("://<host>", 1)[1]
             location = f"{parsed.scheme}://{parsed.netloc}{suffix}"
         except Exception:
