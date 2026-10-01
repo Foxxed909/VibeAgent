@@ -376,6 +376,20 @@ def _run_one_tool(
 def _parse_api_hits(base: str, stdout: str) -> List[str]:
     hits = []
     for line in (stdout or "").splitlines():
+        # Native VibeHacking logs use:
+        #   FOUND — https://<host>/api/path
+        # Privacy mode intentionally redacts the host, so reconstruct it from
+        # the already-authorized base URL while preserving the discovered path.
+        if "FOUND" in line and "—" in line:
+            candidate = line.split("—", 1)[1].strip().split()[0].strip(".,;()")
+            if "://<host>" in candidate:
+                suffix = candidate.split("://<host>", 1)[1]
+                if suffix.startswith("/"):
+                    hits.append(base.rstrip("/") + suffix)
+                    continue
+            if candidate.startswith(("http://", "https://")):
+                hits.append(candidate)
+                continue
         if "\u2192" not in line and "\u2192" not in line and "\u2192" not in line:
             if "\u2192" not in line and "->" not in line and "\u2192" not in line:
                 # support both arrow forms
