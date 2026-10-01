@@ -78,10 +78,10 @@ export VIBEHACKING_ROOT=/path/to/VibeHacking
 No invite/access code is embedded in the frontend or repository. If private invite access is needed, configure only the SHA-256 digest server-side:
 
 ```bash
-VIBE_AGENT_TRIAL_CODE_SHA256=<64-character-sha256>
+VIBE_AGENT_INVITE_CODE_SHA256=<64-character-sha256>
 ```
 
-The raw code is entered by the user and compared server-side using a constant-time digest comparison.
+The raw code is entered by the user and compared server-side using a constant-time digest comparison. The older `VIBE_AGENT_TRIAL_CODE_SHA256` name remains accepted for deployment compatibility.
 
 ### API origin boundary
 
@@ -150,7 +150,7 @@ The scan form queries `/api/capabilities` and only enables the native option whe
 - [x] Canonical structured findings with validation status, CWE/OWASP, evidence and remediation
 - [x] JSON + SARIF 2.1.0 report exports
 - [x] Protected native VibeHacking worker backend with exact-host allowlist
-- [x] `/api/scan`, `/api/stream`, `/api/job`, `/api/report`, `/api/capabilities`
+- [x] `/api/scan`, `/api/stream`, `/api/job`, `/api/report`, `/api/capabilities`, `/api/verify_target`
 - [x] Persistent cloud job store via Vercel KV / Upstash when configured
 - [x] Waitlist persistence via KV / Upstash when configured
 - [x] Server-side hashed private invite validation
