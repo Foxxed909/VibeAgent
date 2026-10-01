@@ -105,7 +105,9 @@ def run_job(
         return report
 
     if stress_multiplier:
-        if not (trial or auth.tier == "enterprise"):
+        if agent_mode == "break":
+            emit("error", text="BreakAgent does not run stress mode; use VibeAgent for explicitly authorized load checks.")
+        elif not (trial or auth.tier == "enterprise"):
             emit("error", text="Stress multipliers require Enterprise tier or trial access code.")
         else:
             try:
