@@ -65,11 +65,33 @@ python -m agent.cli \
   --save
 ```
 
-To expose native VibeHacking capabilities:
+To expose native VibeHacking capabilities from a local checkout:
 
 ```bash
 export VIBEHACKING_ROOT=/path/to/VibeHacking
 ```
+
+### Persistent VibeHacking worker
+
+For deployed/serverless VibeAgent, point it at the **persistent VibeHacking worker itself**:
+
+```bash
+export VIBEHACKING_WORKER_URL=https://your-vibehacking-worker.example
+export VIBEHACKING_WORKER_TOKEN=replace-with-a-random-token-at-least-32-characters
+```
+
+The worker token is sent only in the `X-Vibe-Worker-Token` header. Public workers must use HTTPS; plain HTTP is accepted only for loopback development such as `http://127.0.0.1:8080`.
+
+On the VibeHacking worker, configure the same token as:
+
+```bash
+export VIBE_WORKER_TOKEN=replace-with-the-same-random-token-at-least-32-characters
+python TOOLS/live_dashboard.py --host 0.0.0.0 --port 8080
+```
+
+At scan start, standalone VibeAgent checks `/api/capabilities`. If the worker advertises the protected audit bridge, portable tool calls are executed by full VibeHacking while the standalone LLM loop remains in control. If the worker is unavailable, VibeAgent falls back to its portable implementation instead of aborting the scan.
+
+The remote bridge is intentionally audit-only. It does not expose challenge-bypass, JWT-forging, WAF-evasion, exploit, or load/stress tools.
 
 ## Deploy on Vercel
 
@@ -91,6 +113,7 @@ export VIBEHACKING_ROOT=/path/to/VibeHacking
 - [x] Live SSE thread UI with agent identity
 - [x] Canonical structured findings with validation status, CWE/OWASP, evidence and remediation
 - [x] JSON + SARIF 2.1.0 report exports
+- [x] Protected persistent VibeHacking worker execution with portable fallback
 - [x] `/api/scan`, `/api/stream`, `/api/job`, `/api/report`
 - [x] Persistent cloud job store via Vercel KV / Upstash when configured
 - [x] Waitlist persistence via KV / Upstash when configured
