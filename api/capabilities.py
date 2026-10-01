@@ -11,7 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from agent.worker_client import native_worker_capabilities
+from agent.worker_client import native_worker_capabilities, remote_audit_capabilities
 
 
 class handler(BaseHTTPRequestHandler):
@@ -21,6 +21,12 @@ class handler(BaseHTTPRequestHandler):
         agent_mode = (qs.get("agent") or ["vibe"])[0].strip().lower()
         targets = [target] if target else []
         caps = native_worker_capabilities(targets, agent_mode=agent_mode)
+        tool_caps = remote_audit_capabilities(targets) if target else {
+            "configured": bool(caps.get("configured")),
+            "can_launch": False,
+            "remote_tools": [],
+            "message": "Enter one exact target to check the VibeHacking worker.",
+        }
 
         # Do not expose the configured allowlist itself to public clients.
         native = {
@@ -30,9 +36,16 @@ class handler(BaseHTTPRequestHandler):
             "model": caps.get("model"),
             "message": caps.get("message"),
         }
+        worker_tools = {
+            "configured": bool(tool_caps.get("configured")),
+            "can_launch": bool(tool_caps.get("can_launch")) if target else False,
+            "tool_count": len(tool_caps.get("remote_tools") or []),
+            "message": tool_caps.get("message"),
+        }
         body = {
             "ok": True,
             "portable": True,
+            "worker_tools": worker_tools,
             "native_worker": native,
             "report_formats": ["json", "sarif"],
         }

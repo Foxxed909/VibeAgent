@@ -40,6 +40,32 @@ class AgentModeTests(unittest.TestCase):
         self.assertNotIn("bot_breaker", report["available_tools"])
         self.assertEqual("portable", report["execution_backend"])
 
+    def test_worker_tools_dry_run_keeps_autonomous_catalog(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["https://demo.vercel.app"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Demo",
+        )
+        caps = {
+            "configured": True,
+            "can_launch": True,
+            "remote_tools": ["vibe_headers", "corscan", "api_finder"],
+            "message": "ready",
+        }
+        with patch("agent.orchestrator.remote_audit_capabilities", return_value=caps):
+            report = run_job(
+                auth,
+                dry_run=True,
+                agent_mode="break",
+                execution_backend="worker-tools",
+            )
+        self.assertEqual("worker-tools", report["execution_backend"])
+        self.assertIn("corscan", report["available_tools"])
+        self.assertIn("vibe_headers", report["worker_tools"])
+        self.assertNotIn("bot_breaker", report["available_tools"])
+        self.assertEqual("BreakAgent", report["agent_name"])
+
     def test_native_worker_dry_run_records_backend_without_network(self):
         auth = Authorization(
             tier="hobby",

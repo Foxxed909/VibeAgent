@@ -14,7 +14,7 @@ from .scope import Authorization, CONFIRM_PHRASE
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="VibeAgent / BreakAgent authorized security assessment runner")
     parser.add_argument("--agent", choices=["vibe", "break"], default="vibe", help="Agent mode")
-    parser.add_argument("--backend", choices=["portable", "native-worker"], default="portable", help="Execution backend")
+    parser.add_argument("--backend", choices=["portable", "worker-tools", "native-worker"], default="portable", help="Execution backend")
     parser.add_argument("--tier", choices=["hobby", "enterprise"], default="hobby")
     parser.add_argument("--target", action="append", required=True, help="Exact authorized target; repeat for multiple")
     parser.add_argument("--confirm", required=True, help=f"Must equal: {CONFIRM_PHRASE}")

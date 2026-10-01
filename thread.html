@@ -168,7 +168,10 @@
       else if (t === 'agent_message') row('agent', currentAgent, ev.text || '');
       else if (t === 'reasoning') row('agent', 'reasoning', ev.text || '', true);
       else if (t === 'tool_start') row('tool', 'tool → ' + ev.tool, JSON.stringify(ev.args || {}, null, 2), true);
-      else if (t === 'tool_result') row('tool', 'tool ← ' + ev.tool + (ev.ok ? ' · ok' : ' · fail'), ev.preview || '', true);
+      else if (t === 'tool_result') {
+        const backend = ev.backend ? ' · ' + ev.backend : '';
+        row('tool', 'tool ← ' + ev.tool + backend + (ev.ok ? ' · ok' : ' · fail'), ev.preview || '', true);
+      }
       else if (t === 'finding') {
         const title = ev.title || ev.detail || 'Finding';
         const meta = [

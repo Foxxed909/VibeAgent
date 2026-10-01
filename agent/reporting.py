@@ -31,6 +31,11 @@ def normalized_report(report: Dict[str, Any]) -> Dict[str, Any]:
             "name": report.get("model"),
             "reasoning_effort": report.get("reasoning_effort") or "none",
         },
+        "execution": {
+            "backend": report.get("execution_backend") or "portable",
+            "worker_tools": report.get("worker_tools") or [],
+            "worker_warning": report.get("worker_warning"),
+        },
         "summary": {
             "total_findings": len(findings),
             "severity": severity_counts(report),
