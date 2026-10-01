@@ -7,6 +7,8 @@ import sys
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
+from api._security import apply_cors, require_allowed_origin
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -17,6 +19,8 @@ from agent.target_verification import is_target_verified
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if not require_allowed_origin(self):
+            return
         qs = parse_qs(urlparse(self.path).query)
         target = (qs.get("target") or [""])[0].strip()
         agent_mode = (qs.get("agent") or ["vibe"])[0].strip().lower()
@@ -44,7 +48,7 @@ class handler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        apply_cors(self)
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
@@ -54,7 +58,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        apply_cors(self)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
