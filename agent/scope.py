@@ -3,11 +3,14 @@
 Hobby: exact URLs/hosts + *.vercel.app only.
 Enterprise: exact hosts, URLs, IP/CIDR ranges.
 
-Trial access code unlocks Hobby scans without payment (friends + owner).
+An optional private invite code can unlock Hobby features when its SHA-256 digest is configured server-side.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import ipaddress
+import os
 import re
 from dataclasses import dataclass
 from typing import List, Optional
@@ -15,9 +18,8 @@ from urllib.parse import urlparse
 
 CONFIRM_PHRASE = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS"
 
-# Trial / friend access code — grants Hobby tier without payment.
-# Keep in sync with scan.html
-TRIAL_ACCESS_CODE = "9954FA-67£54CD-GROKJAILEDBROKE£D"
+# Optional private invite code. Store only its SHA-256 digest server-side.
+TRIAL_CODE_SHA256_ENV = "VIBE_AGENT_TRIAL_CODE_SHA256"
 
 
 @dataclass
@@ -69,9 +71,12 @@ class ScopeError(ValueError):
 
 
 def is_valid_trial_code(code: Optional[str]) -> bool:
-    if not code:
+    supplied = (code or "").strip()
+    expected = (os.environ.get(TRIAL_CODE_SHA256_ENV) or "").strip().lower()
+    if not supplied or not re.fullmatch(r"[0-9a-f]{64}", expected):
         return False
-    return code.strip() == TRIAL_ACCESS_CODE
+    digest = hashlib.sha256(supplied.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(digest, expected)
 
 
 def normalize_target(raw: str) -> str:
