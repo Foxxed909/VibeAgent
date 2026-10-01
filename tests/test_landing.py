@@ -13,6 +13,19 @@ class LandingPageTests(unittest.TestCase):
         self.assertNotIn('href="/scan.html"', html)
         self.assertIn('href="/scan"', html)
 
+    def test_scan_page_exposes_both_agent_modes(self):
+        html = (ROOT / "scan.html").read_text(encoding="utf-8")
+        self.assertIn('data-agent="vibe"', html)
+        self.assertIn('data-agent="break"', html)
+        self.assertIn("agent_mode: agentMode", html)
+        self.assertIn('location.href = "/thread?live=1"', html)
+
+    def test_thread_page_renders_dynamic_agent_identity(self):
+        html = (ROOT / "thread.html").read_text(encoding="utf-8")
+        self.assertIn("BreakAgent", html)
+        self.assertIn("currentAgent", html)
+        self.assertNotIn("/thread.html?job=", html)
+
     def test_waitlist_does_not_claim_unsaved_local_success(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertNotIn("Saved locally", html)
