@@ -47,6 +47,7 @@ class handler(BaseHTTPRequestHandler):
             auth.tier, auth.access_code, data.get("stress_multiplier"), data.get("stress_mode")
         )
         cookie = (data.get("cookie") or "").strip() or None
+        agent_mode = data.get("agent_mode") or "vibe"
 
         try:
             report = run_job(
@@ -57,6 +58,7 @@ class handler(BaseHTTPRequestHandler):
                 stress_multiplier=stress_m,
                 stress_mode=stress_mode,
                 cookie=cookie,
+                agent_mode=agent_mode,
             )
             try:
                 save_job(report)

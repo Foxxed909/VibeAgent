@@ -32,12 +32,12 @@
       background: var(--accent); color: #000; border: none; cursor: pointer;
     }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .tier-toggle { display: flex; gap: 8px; margin-bottom: 24px; }
-    .tier-toggle button {
+    .tier-toggle, .agent-toggle { display: flex; gap: 8px; margin-bottom: 24px; }
+    .tier-toggle button, .agent-toggle button {
       flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border);
       background: transparent; color: var(--text-muted); font-weight: 600; cursor: pointer;
     }
-    .tier-toggle button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+    .tier-toggle button.active, .agent-toggle button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
     .enterprise-only { display: none; }
     .error { color: var(--danger); font-size: 0.9rem; margin-bottom: 12px; }
     .success { color: var(--accent); font-size: 0.9rem; margin-top: 16px; }
@@ -61,6 +61,13 @@
       <strong>Trial / friends access</strong><br/>
       Code: <code>9954FA-67£54CD-GROKJAILEDBROKE£D</code>
     </div>
+
+    <label>Agent</label>
+    <div class="agent-toggle">
+      <button type="button" class="active" data-agent="vibe">VibeAgent · discover</button>
+      <button type="button" data-agent="break">BreakAgent · validate</button>
+    </div>
+    <p class="hint" id="agent-hint">VibeAgent maps the authorized surface and follows evidence autonomously.</p>
 
     <div class="tier-toggle">
       <button type="button" class="active" data-tier="hobby">Hobby</button>
@@ -131,8 +138,37 @@
     const CONFIRM = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS";
     const TRIAL_CODE = "9954FA-67£54CD-GROKJAILEDBROKE£D";
     let tier = "hobby";
+    let agentMode = "vibe";
+    const vibeBtn = document.querySelector('[data-agent="vibe"]');
+    const breakBtn = document.querySelector('[data-agent="break"]');
     const hobbyBtn = document.querySelector('[data-tier="hobby"]');
     const entBtn = document.querySelector('[data-tier="enterprise"]');
+
+    function setAgent(mode) {
+      agentMode = mode === "break" ? "break" : "vibe";
+      vibeBtn.classList.toggle("active", agentMode === "vibe");
+      breakBtn.classList.toggle("active", agentMode === "break");
+      const stress = document.getElementById("stress");
+      const stressOrg = document.getElementById("stress_org");
+      const submit = document.getElementById("submit");
+      if (agentMode === "break") {
+        stress.value = "";
+        stress.disabled = true;
+        stressOrg.checked = false;
+        stressOrg.disabled = true;
+        document.getElementById("agent-hint").textContent =
+          "BreakAgent validates suspected weaknesses with targeted evidence. Stress/load mode is disabled.";
+        submit.textContent = "Launch BreakAgent (live)";
+      } else {
+        stress.disabled = false;
+        stressOrg.disabled = false;
+        document.getElementById("agent-hint").textContent =
+          "VibeAgent maps the authorized surface and follows evidence autonomously.";
+        submit.textContent = "Launch VibeAgent (live)";
+      }
+    }
+    vibeBtn.onclick = () => setAgent("vibe");
+    breakBtn.onclick = () => setAgent("break");
 
     function setTier(t) {
       tier = t;
@@ -179,6 +215,7 @@
       const stressVal = document.getElementById("stress").value;
       const stressOrg = document.getElementById("stress_org").checked && effectiveTier === "enterprise";
       const payload = {
+        agent_mode: agentMode,
         tier: effectiveTier,
         targets,
         confirmation: confirm,
@@ -199,13 +236,13 @@
 
       const btn = document.getElementById("submit");
       btn.disabled = true;
-      btn.textContent = "Streaming…";
+      btn.textContent = (agentMode === "break" ? "BreakAgent" : "VibeAgent") + " streaming…";
       ok.textContent = "Opening live thread…";
       ok.hidden = false;
 
       // Store payload so thread can start SSE
       sessionStorage.setItem("vibeagent_pending_scan", JSON.stringify(payload));
-      location.href = "/thread.html?live=1";
+      location.href = "/thread?live=1";
     };
   </script>
 </body>

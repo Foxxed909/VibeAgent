@@ -202,7 +202,7 @@
         <a href="#how">How it works</a>
         <a href="#pricing">Pricing</a>
         <a href="#scope">Scope rules</a>
-        <a href="/scan.html" class="btn btn-primary">Start a scan</a>
+        <a href="/scan" class="btn btn-primary">Start a scan</a>
       </div>
     </div>
   </nav>
@@ -216,7 +216,7 @@
         without the $5,000 enterprise price tag.
       </p>
       <div class="hero-cta">
-        <a href="/scan.html" class="btn btn-primary">Start with Hobby — $50</a>
+        <a href="/scan" class="btn btn-primary">Start with Hobby — $50</a>
         <a href="#how" class="btn btn-ghost">See how it works</a>
       </div>
       <p class="hero-note">Hobby targets: exact URLs + *.vercel.app only</p>
@@ -241,8 +241,8 @@
         </div>
         <div class="step">
           <div class="step-num">03</div>
-          <h3>Agents run VibeHacking tools</h3>
-          <p>Recon, headers, auth, injection, secrets — all scoped to your list. Evidence required, not just status codes.</p>
+          <h3>Choose the right agent</h3>
+          <p><strong>VibeAgent</strong> discovers and maps. <strong>BreakAgent</strong> validates suspected weaknesses with a narrower evidence-focused tool policy.</p>
         </div>
         <div class="step">
           <div class="step-num">04</div>
@@ -269,10 +269,10 @@
             <li><strong>*.vercel.app</strong> allowed</li>
             <li>App name + short ownership note</li>
             <li>Strict rate limits</li>
-            <li>Full VibeHacking tool surface</li>
+            <li>Expanded autonomous VibeAgent audit toolset</li>
             <li>Evidence-based report</li>
           </ul>
-          <a href="/scan.html" class="btn btn-primary">Start Hobby scan</a>
+          <a href="/scan" class="btn btn-primary">Start Hobby scan</a>
         </div>
         <div class="tier">
           <h3>Enterprise</h3>
@@ -286,7 +286,7 @@
             <li>Optional continuous mode</li>
             <li>Priority support</li>
           </ul>
-          <a href="/scan.html" class="btn btn-ghost">Start Enterprise scan</a>
+          <a href="/scan" class="btn btn-ghost">Start Enterprise scan</a>
         </div>
       </div>
 
@@ -316,7 +316,7 @@
     <div class="container">
       <h2>Ready to test what you own?</h2>
       <p>Open the authorization form and declare your exact targets.</p>
-      <a href="/scan.html" class="btn btn-primary">Start a scan</a>
+      <a href="/scan" class="btn btn-primary">Start a scan</a>
     </div>
   </section>
 
@@ -342,9 +342,12 @@
           body: JSON.stringify({ email, tier: 'hobby' }),
         });
         const data = await res.json();
-        msg.textContent = data.message || (data.ok ? "You're on the list." : 'Something went wrong');
+        msg.textContent = data.message || data.error || (data.ok ? "You're on the list." : 'Something went wrong.');
+        if (data.ok) {
+          document.getElementById('wl-email').value = '';
+        }
       } catch {
-        msg.textContent = 'Saved locally — API will be live after Vercel deploy.';
+        msg.textContent = 'Could not reach the waitlist service. Try again shortly.';
       }
     };
   </script>
