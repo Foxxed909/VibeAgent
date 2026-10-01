@@ -3,7 +3,7 @@
 Hobby: exact URLs/hosts + *.vercel.app only.
 Enterprise: exact hosts, URLs, IP/CIDR ranges.
 
-Trial access code unlocks Hobby scans without payment (friends + owner).
+An optional private invite code can unlock Hobby features when its SHA-256 digest is configured server-side.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 
 CONFIRM_PHRASE = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS"
 
-# Optional private invite/trial code. Store only its SHA-256 digest server-side.
+# Optional private invite/private invite code. Store only its SHA-256 digest server-side.
 # Example: printf %s 'your-private-code' | shasum -a 256
 TRIAL_CODE_SHA256_ENV = "VIBE_AGENT_TRIAL_CODE_SHA256"
 
@@ -34,7 +34,7 @@ class Authorization:
     emergency_contact: Optional[str] = None
     note: Optional[str] = None
     time_window: Optional[str] = None
-    access_code: Optional[str] = None  # trial code
+    access_code: Optional[str] = None  # private invite code
 
     def validated(self) -> "Authorization":
         if self.confirmation.strip() != CONFIRM_PHRASE:
