@@ -14,7 +14,7 @@ import re
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 JOBS_DIR = Path(os.environ.get("VIBEAGENT_JOBS_DIR", "/tmp/vibeagent_jobs"))
 KV_URL = (os.environ.get("KV_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL") or "").rstrip("/")
@@ -33,6 +33,9 @@ def _kv_enabled() -> bool:
 
 def _kv_key(job_id: str) -> str:
     return f"vibeagent:job:{job_id}"
+
+
+JOBS_INDEX_KEY = "vibeagent:jobs:index"
 
 
 def _kv_command(*args: Any) -> Any:
@@ -61,6 +64,9 @@ def save_job(report: Dict[str, Any]) -> str:
         try:
             # SET key value EX ttl
             _kv_command("SET", _kv_key(job_id), payload, "EX", TTL_SECONDS)
+            _kv_command("LREM", JOBS_INDEX_KEY, 0, job_id)
+            _kv_command("LPUSH", JOBS_INDEX_KEY, job_id)
+            _kv_command("LTRIM", JOBS_INDEX_KEY, 0, 99)
         except Exception as e:
             # fall through to filesystem
             report.setdefault("errors", []).append(f"KV save failed: {e}")
@@ -99,6 +105,73 @@ def load_job(job_id: str) -> Optional[Dict[str, Any]]:
         except Exception:
             return None
     return None
+
+
+def _job_summary(report: Dict[str, Any], *, include_findings: bool = False) -> Dict[str, Any]:
+    summary = {
+        "job_id": report.get("job_id"),
+        "status": report.get("status"),
+        "agent_mode": report.get("agent_mode"),
+        "agent_name": report.get("agent_name"),
+        "execution_backend": report.get("execution_backend") or "portable",
+        "targets": report.get("targets") or [],
+        "app_name": report.get("app_name"),
+        "company_name": report.get("company_name"),
+        "depth": report.get("depth"),
+        "model": report.get("model"),
+        "provider": report.get("provider"),
+        "summary": report.get("summary") or {
+            "total_findings": len(report.get("findings") or []),
+            "severity": {},
+            "errors": len(report.get("errors") or []),
+        },
+    }
+    if include_findings:
+        summary["findings"] = report.get("findings") or []
+    return summary
+
+
+def list_jobs(limit: int = 30, *, include_findings: bool = False) -> List[Dict[str, Any]]:
+    limit = max(1, min(int(limit or 30), 100))
+    reports: List[Dict[str, Any]] = []
+    seen = set()
+
+    if _kv_enabled():
+        try:
+            ids = _kv_command("LRANGE", JOBS_INDEX_KEY, 0, limit - 1) or []
+            for job_id in ids:
+                job_id = job_id.decode("utf-8") if isinstance(job_id, bytes) else str(job_id)
+                if job_id in seen:
+                    continue
+                report = load_job(job_id)
+                if report:
+                    seen.add(job_id)
+                    reports.append(_job_summary(report, include_findings=include_findings))
+                if len(reports) >= limit:
+                    return reports
+        except Exception:
+            pass
+
+    try:
+        JOBS_DIR.mkdir(parents=True, exist_ok=True)
+        paths = sorted(
+            JOBS_DIR.glob("*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for path in paths:
+            job_id = path.stem
+            if job_id in seen or not _valid_job_id(job_id):
+                continue
+            report = load_job(job_id)
+            if report:
+                seen.add(job_id)
+                reports.append(_job_summary(report, include_findings=include_findings))
+            if len(reports) >= limit:
+                break
+    except Exception:
+        pass
+    return reports
 
 
 def backend_name() -> str:
