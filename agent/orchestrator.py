@@ -17,6 +17,7 @@ from .tools_catalog import (agent_name, get_forced_tools, get_system_prompt, get
 from .depth import get_depth, DepthProfile
 from .findings import add_finding, finding_from_line, finding_from_worker, severity_counts
 from .worker_client import WorkerError, native_worker_capabilities, run_native_target, target_host
+from .request_context import reset_cookie, set_cookie
 from . import job_store as _job_store
 
 try:
@@ -57,6 +58,39 @@ def run_job(
     agent_mode: str = "vibe",
     execution_backend: str = "portable",
 ) -> Dict[str, Any]:
+    cookie_token = set_cookie(cookie)
+    try:
+        return _run_job_impl(
+            auth,
+            dry_run=dry_run,
+            model=model,
+            on_event=on_event,
+            job_id=job_id,
+            depth=depth,
+            stress_multiplier=stress_multiplier,
+            stress_mode=stress_mode,
+            cookie=cookie,
+            agent_mode=agent_mode,
+            execution_backend=execution_backend,
+        )
+    finally:
+        reset_cookie(cookie_token)
+
+
+def _run_job_impl(
+    auth: Authorization,
+    *,
+    dry_run: bool = False,
+    model: Optional[str] = None,
+    on_event: EventCb = None,
+    job_id: Optional[str] = None,
+    depth: str = "standard",
+    stress_multiplier: Optional[int] = None,
+    stress_mode: str = "capped",
+    cookie: Optional[str] = None,
+    agent_mode: str = "vibe",
+    execution_backend: str = "portable",
+) -> Dict[str, Any]:
     auth = auth.validated()
     trial = is_valid_trial_code(auth.access_code)
     job_id = job_id or str(uuid.uuid4())[:12]
@@ -67,9 +101,6 @@ def run_job(
     execution_backend = (execution_backend or "portable").strip().lower()
     if execution_backend not in {"portable", "native-worker"}:
         execution_backend = "portable"
-    if cookie:
-        os.environ["VIBEAGENT_COOKIE"] = cookie
-
     report: Dict[str, Any] = {
         "job_id": job_id,
         "tier": auth.tier,
