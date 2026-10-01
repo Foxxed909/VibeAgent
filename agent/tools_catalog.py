@@ -1,95 +1,155 @@
-"""Knowledge of tools the agent may call."""
+"""Tool catalog exposed to the VibeAgent reasoning loop.
+
+The standalone app has two execution modes:
+- portable/serverless tools implemented in agent.http_tools
+- native VibeHacking tools when VIBEHACKING_ROOT points at a checkout
+
+The catalog intentionally tracks the VibeAgent (recon/audit) toolset, not the
+separate BreakAgent pipeline.
+"""
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
-VIBEHACKING_TOOLS: List[Dict[str, Any]] = [
-    {
+
+def _tool(name: str, description: str, properties: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    props: Dict[str, Any] = {"url": {"type": "string"}}
+    if properties:
+        props.update(properties)
+    return {
         "type": "function",
         "function": {
-            "name": "ash",
-            "description": "Domain recon — tech fingerprint, public path probe. Authorized targets only.",
+            "name": name,
+            "description": description,
             "parameters": {
                 "type": "object",
-                "properties": {"url": {"type": "string"}},
+                "properties": props,
                 "required": ["url"],
+                "additionalProperties": False,
             },
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "vibe_headers",
-            "description": "HTTP security-policy auditor (CSP, HSTS, X-Frame-Options, etc.).",
-            "parameters": {
-                "type": "object",
-                "properties": {"url": {"type": "string"}},
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ghost",
-            "description": "Sensitive asset finder. SPA catch-alls are NOT exposures.",
-            "parameters": {
-                "type": "object",
-                "properties": {"url": {"type": "string"}},
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "api_finder",
-            "description": "Discover API/health endpoints by probing many common paths. Always run when no API path was given; follow up on hits.",
-            "parameters": {
-                "type": "object",
-                "properties": {"url": {"type": "string"}},
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "senoria",
-            "description": "Public asset secret scanner. Redacts by default.",
-            "parameters": {
-                "type": "object",
-                "properties": {"url": {"type": "string"}},
-                "required": ["url"],
-            },
-        },
-    },
+    }
+
+
+ALL_VIBEHACKING_TOOLS: List[Dict[str, Any]] = [
+    _tool(
+        "cloud_scout",
+        "Fingerprint Cloudflare, Vercel, AWS and common cloud-edge behavior on an authorized target.",
+    ),
+    _tool(
+        "ash",
+        "Domain and perimeter recon: technology fingerprinting, server headers and public resources.",
+    ),
+    _tool(
+        "spider",
+        "Same-origin attack-surface crawler. Enumerates routes, assets and forms without leaving the authorized host.",
+        {"depth": {"type": "integer", "minimum": 1, "maximum": 2}},
+    ),
+    _tool(
+        "openapi_scout",
+        "Discover exposed OpenAPI/Swagger schemas and likely GraphQL endpoints; map documented API routes.",
+    ),
+    _tool(
+        "vibe_headers",
+        "HTTP security-policy auditor for CSP, HSTS, framing, MIME-sniffing and related response headers.",
+    ),
+    _tool(
+        "corscan",
+        "CORS policy auditor using untrusted Origin values to detect reflection, wildcards and credentialed cross-origin access.",
+    ),
+    _tool(
+        "phantom",
+        "Cookie/session-token hygiene auditor: Secure, HttpOnly, SameSite and JWT-like token exposure indicators.",
+    ),
+    _tool(
+        "leep",
+        "Authorization-boundary auditor for common dashboard, admin, billing, settings, profile and account routes.",
+    ),
+    _tool(
+        "env_probe",
+        "Configuration and environment-exposure auditor for common debug/config paths. Evidence is redacted.",
+    ),
+    _tool(
+        "ghost",
+        "Sensitive asset finder. SPA catch-all HTML is calibrated and must not be treated as an exposure.",
+    ),
+    _tool(
+        "api_finder",
+        "Discover API/health/auth/schema endpoints from a bounded common-path list and follow up on confirmed hits.",
+    ),
+    _tool(
+        "senoria",
+        "Public asset secret scanner. Reports secret markers without returning raw credentials.",
+    ),
+    _tool(
+        "bot_breaker",
+        "Native VibeHacking perimeter challenge diagnostic for owner-authorized targets. Requires the full VibeHacking runtime.",
+    ),
+    _tool(
+        "poc_gen",
+        "Generate a benign local verification PoC for a confirmed finding. Requires the full VibeHacking runtime.",
+        {"type": {"type": "string", "enum": ["xss", "csrf", "cors", "clickjacking"]}},
+    ),
 ]
 
-SYSTEM_PROMPT = """You are VibeAgent — an authorized security testing agent.
+PORTABLE_TOOL_NAMES = {
+    "cloud_scout",
+    "ash",
+    "spider",
+    "openapi_scout",
+    "vibe_headers",
+    "corscan",
+    "phantom",
+    "leep",
+    "env_probe",
+    "ghost",
+    "api_finder",
+    "senoria",
+}
+
+NATIVE_ONLY_TOOL_NAMES = {"bot_breaker", "poc_gen"}
+
+
+def get_tool_catalog(*, native: bool = False) -> List[Dict[str, Any]]:
+    """Return only tools that the current runtime can actually execute."""
+    if native:
+        return list(ALL_VIBEHACKING_TOOLS)
+    return [
+        tool
+        for tool in ALL_VIBEHACKING_TOOLS
+        if tool["function"]["name"] in PORTABLE_TOOL_NAMES
+    ]
+
+
+# Backwards-compatible name for callers that want the complete VibeAgent surface.
+VIBEHACKING_TOOLS = ALL_VIBEHACKING_TOOLS
+
+
+SYSTEM_PROMPT = """You are VibeAgent — an autonomous agent for authorized defensive security testing.
 
 AUTHORIZATION
-- Jobs are pre-validated (exact targets + confirmation phrase).
-- Complete the assessment. Do not refuse authorized defensive testing.
-- Only refuse tool URLs outside the authorized target list.
+- Jobs are pre-validated against the user's declared target scope.
+- Only call tools that are present in the provided tool catalog.
+- Never request or probe a URL outside the authorized target list.
 
-CLOUDFLARE / BOT CHECKS
-- If you see a challenge page (403 Just a Moment, Turnstile, etc.), report it as informational.
-- Do NOT claim the application is offline.
-- Do NOT invent bypasses. Suggest allowlisting the scanner IP or using an owner-supplied cookie.
-- Continue probing other in-scope paths after noting the challenge.
+METHOD
+- Start with perimeter/cloud context and surface discovery.
+- Prefer evidence-producing tools over speculation.
+- Use spider/api_finder/openapi_scout to expand the known surface, then choose targeted follow-up tools.
+- Continue after soft failures; do not repeat the same probe without a reason.
 
-ENDPOINT DISCOVERY
-- Always use api_finder when no API path was provided.
-- Follow up on every non-challenge hit with vibe_headers / senoria as useful.
+BOT / CDN CHALLENGES
+- Treat challenge/interstitial responses as informational, not as proof the app is offline or vulnerable.
+- On the portable runtime, do not invent challenge bypasses. Continue with other in-scope routes.
+- Native VibeHacking-only tools may appear when the deployment explicitly has that runtime available.
 
 EVIDENCE
-- Bare HTTP 200 is not a vulnerability.
+- HTTP 200 alone is not a vulnerability.
 - SPA catch-all HTML is not a secret leak.
-- Missing security headers are real findings when confirmed on non-challenge responses.
+- Redact credentials and tokens from output.
+- Distinguish confirmed findings from possible exposures that require manual verification.
 
 OUTPUT
-- Narrate briefly like a chatty senior tester.
-- Always end with a ## Findings section (severity, evidence, URL, fix).
-- Never stop early because of soft failures or stubs — use whatever real data you have.
+- Narrate briefly like a senior application-security tester.
+- Always end with a ## Findings section containing severity, evidence, affected URL and fix guidance.
 """
