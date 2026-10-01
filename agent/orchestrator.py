@@ -16,7 +16,12 @@ from .scope import Authorization, ScopeError, assert_url_in_scope, CONFIRM_PHRAS
 from .tools_catalog import (agent_name, get_forced_tools, get_system_prompt, get_tool_catalog, normalize_agent_mode)
 from .depth import get_depth, DepthProfile
 from .findings import add_finding, finding_from_line, severity_counts
-from .worker_client import WorkerError, get_capabilities as get_worker_capabilities, run_tool as run_worker_tool
+from .worker_client import (
+    WorkerError,
+    get_capabilities as get_worker_capabilities,
+    get_config as get_worker_config,
+    run_tool as run_worker_tool,
+)
 from . import job_store as _job_store
 
 try:
@@ -67,14 +72,22 @@ def run_job(
     worker_warning = ""
     if not VIBEHACKING_ROOT:
         try:
-            worker_caps = get_worker_capabilities()
-            worker_tools = {
-                str(name)
-                for name in (worker_caps.get("remote_tools") or [])
-                if isinstance(name, str)
-            }
+            worker_config = get_worker_config()
         except WorkerError as exc:
+            worker_config = None
             worker_warning = str(exc)
+        if worker_config:
+            try:
+                worker_caps = get_worker_capabilities()
+                worker_tools = {
+                    str(name)
+                    for name in (worker_caps.get("remote_tools") or [])
+                    if isinstance(name, str)
+                }
+                if not worker_tools:
+                    worker_warning = "VibeHacking worker is reachable but does not advertise remote audit tools."
+            except WorkerError as exc:
+                worker_warning = str(exc)
     execution_backend = (
         "local-vibehacking"
         if VIBEHACKING_ROOT
@@ -265,7 +278,7 @@ def run_job(
                 emit(
                     "tool_result",
                     tool=name,
-                    ok=True,
+                    ok=int(result.get("returncode") or 0) == 0,
                     backend=result.get("backend"),
                     preview=(out or "")[:2500],
                 )
@@ -337,7 +350,7 @@ def _run_one_tool(
             emit(
                 "tool_result",
                 tool=name,
-                ok=True,
+                ok=int(result.get("returncode") or 0) == 0,
                 backend=result.get("backend"),
                 preview=(out or "")[:2500],
             )
