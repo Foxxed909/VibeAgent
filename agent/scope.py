@@ -20,7 +20,8 @@ CONFIRM_PHRASE = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS"
 
 # Optional private invite code. Store only its SHA-256 digest server-side.
 # Example: printf %s 'your-private-code' | shasum -a 256
-TRIAL_CODE_SHA256_ENV = "VIBE_AGENT_TRIAL_CODE_SHA256"
+INVITE_CODE_SHA256_ENV = "VIBE_AGENT_INVITE_CODE_SHA256"
+LEGACY_TRIAL_CODE_SHA256_ENV = "VIBE_AGENT_TRIAL_CODE_SHA256"
 
 
 @dataclass
@@ -75,7 +76,11 @@ class ScopeError(ValueError):
 
 def is_valid_trial_code(code: Optional[str]) -> bool:
     supplied = (code or "").strip()
-    expected = (os.environ.get(TRIAL_CODE_SHA256_ENV) or "").strip().lower()
+    expected = (
+        os.environ.get(INVITE_CODE_SHA256_ENV)
+        or os.environ.get(LEGACY_TRIAL_CODE_SHA256_ENV)
+        or ""
+    ).strip().lower()
     if not supplied or not re.fullmatch(r"[0-9a-f]{64}", expected):
         return False
     digest = hashlib.sha256(supplied.encode("utf-8")).hexdigest()
