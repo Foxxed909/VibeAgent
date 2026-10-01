@@ -9,7 +9,7 @@ Both modes share the same model layer, scope enforcement, SSE live thread, job p
 
 ## Product tiers
 
-- **Hobby** — $50 / scan · exact URLs + `*.vercel.app` only · trial code supported
+- **Hobby** — $50 / scan · exact URLs + `*.vercel.app` only · optional private invite support
 - **Enterprise** — $200 / scan · hosts, URLs, IP ranges
 
 Powered by [VibeHacking](https://github.com/Foxxed909/VibeHacking) tools. Agents only operate against targets the user declares and confirms.
@@ -71,6 +71,42 @@ To expose native VibeHacking capabilities:
 export VIBEHACKING_ROOT=/path/to/VibeHacking
 ```
 
+## Security hardening
+
+### Private invite codes
+
+No invite/access code is embedded in the frontend or repository. Optional invite access uses only a server-side SHA-256 digest:
+
+```bash
+VIBE_AGENT_TRIAL_CODE_SHA256=<64-character-sha256>
+```
+
+The raw code is compared server-side using a constant-time digest comparison.
+
+### API origin boundary
+
+Sensitive browser endpoints use same-origin CORS instead of `Access-Control-Allow-Origin: *`. Extra trusted origins can be configured explicitly:
+
+```bash
+VIBE_AGENT_ALLOWED_ORIGINS=https://admin.example.com
+```
+
+JSON request bodies default to a 16 KB maximum; `VIBE_AGENT_MAX_JSON_BODY_BYTES` can override that ceiling deliberately.
+
+### Per-job cookies
+
+Optional Cloudflare/session cookies are stored in a per-request `ContextVar`, not process-global environment state, so warm/concurrent workers cannot leak one scan's cookie into another.
+
+### Worker target ownership
+
+Worker-backed execution requires an exact HTTPS ownership proof at:
+
+```text
+/.well-known/vibeagent-verification.txt
+```
+
+The verification API only operates on hosts already present in the standalone worker allowlist, and the scan UI will not enable worker-tools until both allowlisting and ownership verification succeed.
+
 ## Persistent VibeHacking worker
 
 Portable mode is the default. The recommended native path is **worker-tools**:
@@ -99,6 +135,7 @@ The worker-tools bridge is fail-closed:
 - the standalone worker URL must be HTTPS with no embedded credentials, path, query or fragment;
 - the token must be at least 32 characters;
 - both the standalone app **and** VibeHacking worker independently enforce exact hostnames;
+- worker-backed targets also require the one-time `/.well-known/vibeagent-verification.txt` proof;
 - wildcards and automatic subdomain expansion are not accepted;
 - redirects are refused so the worker token is never forwarded to another origin;
 - only the worker's defensive audit allowlist is exposed remotely;
@@ -112,8 +149,19 @@ UI path. Native BreakAgent whole-agent delegation remains separately gated by
 `VIBE_AGENT_ENABLE_NATIVE_BREAKAGENT=1`.
 
 The scan form queries `/api/capabilities` and only enables worker-tools when the
-exact target passes the standalone allowlist and the worker advertises its
-protected remote audit bridge.
+exact target passes both allowlists, ownership verification succeeds, and the worker advertises its
+protected remote audit bridge. Challenge creation/confirmation is exposed through
+`POST /api/verify_target`. Configure Vercel KV / Upstash for reliable verification state on serverless deployments.
+
+## Workspace
+
+Open `/app` for the persisted security workspace:
+
+- **Runs** — recent VibeAgent / BreakAgent jobs, backend, depth and finding counts
+- **Findings** — aggregated structured findings across recent jobs
+- **Reports** — direct JSON / SARIF downloads and thread links
+
+The workspace is backed by `GET /api/jobs?include=findings`. KV / Upstash is recommended so history survives serverless instance rotation.
 
 ## Deploy on Vercel
 
@@ -140,6 +188,11 @@ protected remote audit bridge.
 - [x] `/api/scan`, `/api/stream`, `/api/job`, `/api/report`, `/api/capabilities`
 - [x] Persistent cloud job store via Vercel KV / Upstash when configured
 - [x] Waitlist persistence via KV / Upstash when configured
+- [x] Runs / Findings / Reports workspace
+- [x] Server-side hashed private invite validation
+- [x] Per-job cookie isolation
+- [x] Same-origin sensitive API boundary + request-size limits
+- [x] Worker target ownership verification
 - [ ] Billing
 
 ## Golden rule
