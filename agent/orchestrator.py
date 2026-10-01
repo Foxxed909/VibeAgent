@@ -15,6 +15,7 @@ from .models import chat, OpenRouterError
 from .scope import Authorization, ScopeError, assert_url_in_scope, CONFIRM_PHRASE, is_valid_trial_code
 from .tools_catalog import (agent_name, get_forced_tools, get_system_prompt, get_tool_catalog, normalize_agent_mode)
 from .depth import get_depth, DepthProfile
+from .findings import add_finding, finding_from_line, severity_counts
 from . import job_store as _job_store
 
 try:
@@ -233,7 +234,7 @@ def run_job(
                 report["tool_calls"].append({"tool": name, "args": args, "result": result})
                 out = result.get("stdout") or result.get("message") or json.dumps(result)[:3000]
                 emit("tool_result", tool=name, ok=True, preview=(out or "")[:2500])
-                _harvest_findings(name, out, report, emit)
+                _harvest_findings(name, out, report, emit, args=args)
                 messages.append({"role": "tool", "tool_call_id": tc_id, "content": (out or "")[:6000]})
             except ScopeError as e:
                 report["errors"].append(f"Scope violation blocked: {e}")
@@ -270,7 +271,12 @@ def run_job(
             emit("agent_message", text=report["report_text"])
 
     report["status"] = "completed"
-    emit("done", status="completed", findings=len(report["findings"]))
+    report["summary"] = {
+        "total_findings": len(report["findings"]),
+        "severity": severity_counts(report),
+        "errors": len(report.get("errors") or []),
+    }
+    emit("done", status="completed", findings=len(report["findings"]), summary=report["summary"])
     return report
 
 
@@ -285,7 +291,7 @@ def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile) -> None
             report["tool_calls"].append({"tool": name, "args": args, "result": result})
             out = result.get("stdout") or result.get("message") or json.dumps(result)[:3000]
             emit("tool_result", tool=name, ok=True, preview=(out or "")[:2500])
-            _harvest_findings(name, out, report, emit)
+            _harvest_findings(name, out, report, emit, args=args)
             if "[CHALLENGE]" in (out or ""):
                 emit("finding", severity="info", detail=f"Bot/CDN challenge during {name}")
             return
@@ -331,17 +337,44 @@ def _parse_api_hits(base: str, stdout: str) -> List[str]:
     return hits[:12]
 
 
-def _harvest_findings(name: str, out: str, report: Dict[str, Any], emit) -> None:
+def _harvest_findings(
+    name: str,
+    out: str,
+    report: Dict[str, Any],
+    emit,
+    *,
+    args: Optional[Dict[str, Any]] = None,
+) -> None:
     if not out:
         return
-    for line in out.splitlines():
-        if "MISSING:" in line or "CRITICAL" in line:
-            detail = line.strip()
-            report["findings"].append({"severity": "critical", "tool": name, "detail": detail})
-            emit("finding", severity="critical", detail=detail)
-        if "POSSIBLE exposure" in line:
-            report["findings"].append({"severity": "high", "tool": name, "detail": line.strip()})
-            emit("finding", severity="high", detail=line.strip())
+    url = str((args or {}).get("url") or "")
+    for raw in out.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        is_finding = (
+            "MISSING:" in line
+            or "CRITICAL" in line
+            or "POSSIBLE exposure" in line
+        )
+        if not is_finding:
+            continue
+        finding = finding_from_line(name, line, url=url)
+        if add_finding(report, finding):
+            emit(
+                "finding",
+                id=finding.get("id"),
+                title=finding.get("title"),
+                severity=finding.get("severity"),
+                validation_status=finding.get("validation_status"),
+                tool=finding.get("tool"),
+                location=finding.get("location"),
+                evidence=finding.get("evidence"),
+                recommendation=finding.get("recommendation"),
+                cwe=finding.get("cwe"),
+                owasp=finding.get("owasp"),
+                detail=finding.get("evidence"),
+            )
 
 
 def _local_findings_fallback(report: Dict[str, Any]) -> str:
