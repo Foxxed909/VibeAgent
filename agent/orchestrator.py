@@ -381,7 +381,10 @@ def _local_findings_fallback(report: Dict[str, Any]) -> str:
     lines = ["## Findings", ""]
     if report.get("findings"):
         for f in report["findings"]:
-            lines.append(f"- **{f.get('severity', 'info')}** ({f.get('tool')}): {f.get('detail')}")
+            lines.append(
+                f"- **{f.get('severity', 'info')}** ({f.get('tool')}): "
+                f"{f.get('evidence') or f.get('detail') or f.get('title') or 'Finding'}"
+            )
     else:
         lines.append("- No automated critical findings harvested. Review tool transcripts above.")
     return "\n".join(lines)
