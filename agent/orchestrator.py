@@ -13,7 +13,7 @@ from urllib.parse import urljoin
 
 from .models import chat, OpenRouterError
 from .scope import Authorization, ScopeError, assert_url_in_scope, CONFIRM_PHRASE, is_valid_trial_code
-from .tools_catalog import VIBEHACKING_TOOLS, SYSTEM_PROMPT
+from .tools_catalog import get_tool_catalog, SYSTEM_PROMPT
 from .depth import get_depth, DepthProfile
 from . import job_store as _job_store
 
@@ -131,10 +131,10 @@ def run_job(
     ]
     emit("agent_message", text=f"Starting {profile.name} assessment ({profile.max_rounds} max rounds).")
 
-    forced_tools = ["ash", "vibe_headers"]
+    forced_tools = ["cloud_scout", "ash", "vibe_headers"]
     if profile.force_api_finder:
         forced_tools.append("api_finder")
-    forced_tools.extend(["ghost", "senoria"])
+    forced_tools.extend(["openapi_scout", "ghost", "senoria"])
 
     for target in auth.targets:
         base = target if "://" in target else f"https://{target}"
@@ -169,7 +169,7 @@ def run_job(
     for round_i in range(profile.max_rounds):
         emit("round", index=round_i + 1, max=profile.max_rounds)
         try:
-            completion = chat(messages, model=model, tools=VIBEHACKING_TOOLS, max_tokens=4096)
+            completion = chat(messages, model=model, tools=tool_catalog, max_tokens=4096)
         except (OpenRouterError, OpenAIError) as e:
             report["errors"].append(str(e))
             emit("error", text=str(e))
@@ -343,8 +343,16 @@ def _dispatch_tool(name: str, args: Dict[str, Any], auth: Authorization, profile
     if VIBEHACKING_ROOT:
         script = Path(VIBEHACKING_ROOT) / "TOOLS" / f"{name}.py"
         if script.exists():
+            cmd = [sys.executable, str(script), "--url", url]
+            if name == "spider":
+                cmd.extend(["--depth", str(max(1, min(int(args.get("depth") or 1), 2)))])
+            elif name == "poc_gen":
+                poc_type = str(args.get("type") or "clickjacking").lower()
+                if poc_type not in {"xss", "csrf", "cors", "clickjacking"}:
+                    poc_type = "clickjacking"
+                cmd.extend(["--type", poc_type])
             proc = subprocess.run(
-                [sys.executable, str(script), "--url", url],
+                cmd,
                 capture_output=True, text=True,
                 timeout=(profile.tool_timeout_s if profile else 20),
                 cwd=VIBEHACKING_ROOT,
