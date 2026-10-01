@@ -95,7 +95,7 @@
 
       <label for="targets">Exact targets (one per line)</label>
       <textarea id="targets" name="targets" required placeholder="https://my-app.vercel.app"></textarea>
-      <p class="hint" id="target-hint">Hobby: exact URLs/hosts and *.vercel.app only.</p>
+      <p class="hint" id="target-hint">Hobby: exact URLs/hosts only. Vercel apps must use their exact hostname.</p>
 
       <label for="execution_backend">Execution backend</label>
       <select id="execution_backend" name="execution_backend">
@@ -261,7 +261,7 @@
       document.getElementById("company_name").required = t === "enterprise";
       document.getElementById("stress-50").disabled = t !== "enterprise";
       document.getElementById("target-hint").textContent = t === "hobby"
-        ? "Hobby: exact URLs/hosts and *.vercel.app only."
+        ? "Hobby: exact URLs/hosts only. Vercel apps must use their exact hostname."
         : "Enterprise: exact hosts, URLs, IP/CIDR. Org can raise stress ceilings.";
     }
     hobbyBtn.onclick = () => setTier("hobby");
