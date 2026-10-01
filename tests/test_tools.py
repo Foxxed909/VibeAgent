@@ -8,8 +8,8 @@ from agent.tools_catalog import get_tool_catalog
 
 
 class ToolCatalogTests(unittest.TestCase):
-    def _names(self, native: bool):
-        return {t["function"]["name"] for t in get_tool_catalog(native=native)}
+    def _names(self, native: bool, agent_mode: str = "vibe"):
+        return {t["function"]["name"] for t in get_tool_catalog(native=native, agent_mode=agent_mode)}
 
     def test_portable_catalog_exposes_real_serverless_tools(self):
         names = self._names(native=False)
@@ -25,6 +25,22 @@ class ToolCatalogTests(unittest.TestCase):
         names = self._names(native=True)
         self.assertIn("bot_breaker", names)
         self.assertIn("poc_gen", names)
+
+    def test_breakagent_portable_policy_is_validation_focused(self):
+        names = self._names(native=False, agent_mode="break")
+        self.assertIn("corscan", names)
+        self.assertIn("phantom", names)
+        self.assertIn("leep", names)
+        self.assertIn("env_probe", names)
+        self.assertNotIn("ash", names)
+        self.assertNotIn("spider", names)
+        self.assertNotIn("bot_breaker", names)
+        self.assertNotIn("poc_gen", names)
+
+    def test_breakagent_native_only_adds_benign_poc(self):
+        names = self._names(native=True, agent_mode="break")
+        self.assertIn("poc_gen", names)
+        self.assertNotIn("bot_breaker", names)
 
     def test_cloud_scout_fingerprints_vercel(self):
         def fake_fetch(url, method="GET", headers=None, timeout=12):
