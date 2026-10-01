@@ -103,7 +103,15 @@ def target_is_worker_allowed(target: str, config: Optional[WorkerConfig] = None)
     return bool(cfg and host and host in cfg.allowed_hosts)
 
 
-def native_worker_capabilities(targets: Optional[Iterable[str]] = None) -> Dict[str, Any]:
+def native_breakagent_enabled() -> bool:
+    return (os.environ.get("VIBE_AGENT_ENABLE_NATIVE_BREAKAGENT") or "").strip().lower() in {"1", "true", "yes"}
+
+
+def native_worker_capabilities(
+    targets: Optional[Iterable[str]] = None,
+    *,
+    agent_mode: str = "vibe",
+) -> Dict[str, Any]:
     cfg = get_worker_config()
     if not cfg:
         return {
@@ -116,13 +124,19 @@ def native_worker_capabilities(targets: Optional[Iterable[str]] = None) -> Dict[
         }
     target_list = list(targets or [])
     rejected = [t for t in target_list if not target_is_worker_allowed(t, cfg)]
+    break_blocked = (agent_mode or "").lower() == "break" and not native_breakagent_enabled()
     return {
         "configured": True,
-        "can_launch": not rejected,
+        "can_launch": not rejected and not break_blocked,
+        "native_breakagent_enabled": native_breakagent_enabled(),
         "allowed_hosts": sorted(cfg.allowed_hosts),
         "rejected_targets": rejected,
         "model": cfg.model,
-        "message": "Protected native VibeHacking worker is configured.",
+        "message": (
+            "Native BreakAgent is disabled until VIBE_AGENT_ENABLE_NATIVE_BREAKAGENT=1."
+            if break_blocked
+            else "Protected native VibeHacking worker is configured."
+        ),
     }
 
 
@@ -182,6 +196,8 @@ def start_thread(target: str, agent_mode: str, cfg: Optional[WorkerConfig] = Non
         raise WorkerError("target hostname is not in VIBE_AGENT_WORKER_ALLOWED_HOSTS")
 
     mode = "BreakAgent" if (agent_mode or "").lower() == "break" else "VibeAgent"
+    if mode == "BreakAgent" and not native_breakagent_enabled():
+        raise WorkerError("native BreakAgent is disabled by server policy")
     result = _request(
         config,
         "/api/threads/start",
