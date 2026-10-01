@@ -36,6 +36,7 @@ class AgentModeTests(unittest.TestCase):
         report = run_job(auth, dry_run=True, agent_mode="break")
         self.assertEqual("break", report["agent_mode"])
         self.assertEqual("BreakAgent", report["agent_name"])
+        self.assertFalse(report["worker_tool_capabilities"]["can_launch"])
         self.assertIn("corscan", report["available_tools"])
         self.assertNotIn("bot_breaker", report["available_tools"])
         self.assertEqual("portable", report["execution_backend"])
@@ -81,7 +82,8 @@ class AgentModeTests(unittest.TestCase):
             report = run_job(auth, dry_run=True, agent_mode="vibe", execution_backend="native-worker")
         self.assertEqual("native-worker", report["execution_backend"])
         self.assertEqual(["native-worker-managed"], report["available_tools"])
-        self.assertTrue(report["native_worker_capabilities"]["can_launch"])
+        self.assertFalse(report["native_worker_capabilities"]["can_launch"])
+        self.assertFalse(report["native_worker_capabilities"]["ownership_verified"])
 
     def test_native_worker_filters_shared_findings_to_exact_target(self):
         auth = Authorization(
@@ -124,6 +126,8 @@ class AgentModeTests(unittest.TestCase):
             "VIBE_AGENT_WORKER_ALLOWED_HOSTS": "demo.vercel.app",
         }
         with patch.dict(os.environ, env, clear=True), patch(
+            "agent.orchestrator.is_target_verified", return_value=True
+        ), patch(
             "agent.orchestrator.run_native_target", return_value=worker_state
         ):
             report = run_job(
