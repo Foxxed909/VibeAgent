@@ -128,6 +128,61 @@ def finding_from_line(tool: str, line: str, *, url: Optional[str] = None) -> Dic
     }
 
 
+def _restore_worker_location(location: str, requested_url: str) -> str:
+    value = (location or "").strip()
+    if "://<host>" not in value or not requested_url:
+        return value or requested_url
+    try:
+        scheme, rest = requested_url.split("://", 1)
+        netloc = rest.split("/", 1)[0]
+        suffix = value.split("://<host>", 1)[1]
+        return f"{scheme}://{netloc}{suffix}"
+    except Exception:
+        return requested_url
+
+
+def finding_from_native(
+    item: Dict[str, Any],
+    *,
+    default_tool: str = "",
+    requested_url: str = "",
+) -> Dict[str, Any]:
+    """Normalize a structured VibeHacking worker finding into VibeAgent's schema."""
+    raw_tool = str(item.get("tool") or default_tool or "unknown").strip()
+    tool = default_tool or raw_tool.lower().replace(" ", "_")
+    meta = TOOL_META.get(tool, {})
+    title = str(item.get("title") or meta.get("title") or f"{tool} finding").strip()
+    severity = str(item.get("severity") or "info").strip().lower()
+    if severity not in SEVERITY_RANK:
+        severity = "medium"
+    evidence = str(item.get("evidence") or title).strip()
+    location = _restore_worker_location(str(item.get("location") or ""), requested_url)
+    validation = str(item.get("validation_status") or "").strip().lower()
+    if validation not in {"confirmed", "observed", "unconfirmed", "informational"}:
+        validation = "informational" if severity == "info" else "observed"
+    recommendation = str(
+        item.get("recommendation")
+        or meta.get("remediation")
+        or "Review the evidence and remediate the underlying security control."
+    ).strip()
+    cwe = item.get("cwe") or meta.get("cwe")
+    owasp = item.get("owasp") or meta.get("owasp")
+    fingerprint = f"{tool}|{location}|{title}|{evidence}"
+    finding_id = "VA-" + hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:12].upper()
+    return {
+        "id": finding_id,
+        "title": title,
+        "severity": severity,
+        "validation_status": validation,
+        "tool": tool,
+        "location": location,
+        "evidence": evidence,
+        "recommendation": recommendation,
+        "cwe": cwe,
+        "owasp": owasp,
+    }
+
+
 def add_finding(report: Dict[str, Any], finding: Dict[str, Any]) -> bool:
     existing = {f.get("id") for f in report.setdefault("findings", [])}
     if finding.get("id") in existing:
