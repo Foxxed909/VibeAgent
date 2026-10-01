@@ -17,6 +17,7 @@ def normalized_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "agent": {
             "mode": report.get("agent_mode") or "vibe",
             "name": report.get("agent_name") or "VibeAgent",
+            "execution_backend": report.get("execution_backend") or "portable",
         },
         "assessment": {
             "tier": report.get("tier"),
@@ -120,6 +121,8 @@ def sarif_dict(report: Dict[str, Any]) -> Dict[str, Any]:
             "properties": {
                 "jobId": report.get("job_id"),
                 "agentMode": report.get("agent_mode") or "vibe",
+                "executionBackend": report.get("execution_backend") or "portable",
+                "nativeWorkerThreadId": ((report.get("native_worker") or {}).get("thread_id")),
             },
         }],
     }

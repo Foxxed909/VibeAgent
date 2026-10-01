@@ -48,6 +48,7 @@ class handler(BaseHTTPRequestHandler):
         )
         cookie = (data.get("cookie") or "").strip() or None
         agent_mode = data.get("agent_mode") or "vibe"
+        execution_backend = data.get("execution_backend") or "portable"
 
         try:
             report = run_job(
@@ -59,6 +60,7 @@ class handler(BaseHTTPRequestHandler):
                 stress_mode=stress_mode,
                 cookie=cookie,
                 agent_mode=agent_mode,
+                execution_backend=execution_backend,
             )
             try:
                 save_job(report)

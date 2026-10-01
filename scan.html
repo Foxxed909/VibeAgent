@@ -96,6 +96,13 @@
       <textarea id="targets" name="targets" required placeholder="https://my-app.vercel.app"></textarea>
       <p class="hint" id="target-hint">Hobby: exact URLs/hosts and *.vercel.app only.</p>
 
+      <label for="execution_backend">Execution backend</label>
+      <select id="execution_backend" name="execution_backend">
+        <option value="portable">Portable · serverless agent</option>
+        <option value="native-worker" id="native-worker-option" disabled>Native VibeHacking worker</option>
+      </select>
+      <p class="hint" id="backend-hint">Portable mode uses the bounded serverless tool implementations.</p>
+
       <label for="depth">Depth</label>
       <select id="depth" name="depth">
         <option value="quick">Quick — ~4 rounds</option>
@@ -143,29 +150,77 @@
     const breakBtn = document.querySelector('[data-agent="break"]');
     const hobbyBtn = document.querySelector('[data-tier="hobby"]');
     const entBtn = document.querySelector('[data-tier="enterprise"]');
+    const backendSelect = document.getElementById("execution_backend");
+    const nativeOption = document.getElementById("native-worker-option");
+    const backendHint = document.getElementById("backend-hint");
+    let capabilityTimer = null;
+
+    function updateStressState() {
+      const stress = document.getElementById("stress");
+      const stressOrg = document.getElementById("stress_org");
+      const disabled = agentMode === "break" || backendSelect.value === "native-worker";
+      if (disabled) {
+        stress.value = "";
+        stressOrg.checked = false;
+      }
+      stress.disabled = disabled;
+      stressOrg.disabled = disabled;
+    }
+
+    async function refreshNativeAvailability() {
+      const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
+      nativeOption.disabled = true;
+      if (targets.length !== 1) {
+        if (backendSelect.value === "native-worker") backendSelect.value = "portable";
+        backendHint.textContent = targets.length > 1
+          ? "Native worker currently requires exactly one server-approved target per job."
+          : "Portable mode uses the bounded serverless tool implementations.";
+        updateStressState();
+        return;
+      }
+      try {
+        const res = await fetch(
+          "/api/capabilities?target=" + encodeURIComponent(targets[0]) +
+          "&agent=" + encodeURIComponent(agentMode)
+        );
+        const data = await res.json();
+        const native = data.native_worker || {};
+        nativeOption.disabled = !native.can_launch;
+        if (native.can_launch) {
+          backendHint.textContent = "Native worker is available for this exact approved target" +
+            (native.model ? " · model " + native.model : "") + ".";
+        } else {
+          if (backendSelect.value === "native-worker") backendSelect.value = "portable";
+          backendHint.textContent = native.message || "Native worker is not available for this target.";
+        }
+      } catch {
+        if (backendSelect.value === "native-worker") backendSelect.value = "portable";
+        backendHint.textContent = "Could not verify native-worker availability; using portable mode.";
+      }
+      updateStressState();
+    }
+
+    function queueCapabilityRefresh() {
+      clearTimeout(capabilityTimer);
+      capabilityTimer = setTimeout(refreshNativeAvailability, 300);
+    }
 
     function setAgent(mode) {
       agentMode = mode === "break" ? "break" : "vibe";
       vibeBtn.classList.toggle("active", agentMode === "vibe");
       breakBtn.classList.toggle("active", agentMode === "break");
-      const stress = document.getElementById("stress");
-      const stressOrg = document.getElementById("stress_org");
       const submit = document.getElementById("submit");
       if (agentMode === "break") {
-        stress.value = "";
-        stress.disabled = true;
-        stressOrg.checked = false;
-        stressOrg.disabled = true;
         document.getElementById("agent-hint").textContent =
-          "BreakAgent validates suspected weaknesses with targeted evidence. Stress/load mode is disabled.";
+          "BreakAgent validates suspected weaknesses with targeted evidence. Portable stress/load mode is disabled.";
         submit.textContent = "Launch BreakAgent (live)";
       } else {
-        stress.disabled = false;
-        stressOrg.disabled = false;
         document.getElementById("agent-hint").textContent =
           "VibeAgent maps the authorized surface and follows evidence autonomously.";
         submit.textContent = "Launch VibeAgent (live)";
       }
+      updateStressState();
+      queueCapabilityRefresh();
     }
     vibeBtn.onclick = () => setAgent("vibe");
     breakBtn.onclick = () => setAgent("break");
@@ -187,6 +242,13 @@
     }
     hobbyBtn.onclick = () => setTier("hobby");
     entBtn.onclick = () => setTier("enterprise");
+    backendSelect.onchange = () => {
+      updateStressState();
+      backendHint.textContent = backendSelect.value === "native-worker"
+        ? "Native worker selected. The target must remain on the server-side exact-host allowlist."
+        : "Portable mode uses the bounded serverless tool implementations.";
+    };
+    document.getElementById("targets").addEventListener("input", queueCapabilityRefresh);
 
     document.getElementById("scan-form").onsubmit = (e) => {
       e.preventDefault();
@@ -212,10 +274,19 @@
         depth = "standard";
       }
 
+      const executionBackend = backendSelect.value || "portable";
+      if (executionBackend === "native-worker" && targets.length !== 1) {
+        err.textContent = "Native worker requires exactly one approved target."; err.hidden = false; return;
+      }
+      if (executionBackend === "native-worker" && nativeOption.disabled) {
+        err.textContent = "Native worker is not approved for this target / agent mode."; err.hidden = false; return;
+      }
+
       const stressVal = document.getElementById("stress").value;
       const stressOrg = document.getElementById("stress_org").checked && effectiveTier === "enterprise";
       const payload = {
         agent_mode: agentMode,
+        execution_backend: executionBackend,
         tier: effectiveTier,
         targets,
         confirmation: confirm,
@@ -226,7 +297,7 @@
         contact_email: document.getElementById("contact_email").value.trim(),
         emergency_contact: document.getElementById("emergency_contact").value.trim(),
         depth,
-        stress_multiplier: stressVal ? parseInt(stressVal, 10) : null,
+        stress_multiplier: executionBackend === "portable" && stressVal ? parseInt(stressVal, 10) : null,
         stress_mode: stressOrg ? "org" : "capped",
         cookie: document.getElementById("cookie").value.trim() || null,
       };
@@ -244,6 +315,9 @@
       sessionStorage.setItem("vibeagent_pending_scan", JSON.stringify(payload));
       location.href = "/thread?live=1";
     };
+
+    updateStressState();
+    queueCapabilityRefresh();
   </script>
 </body>
 </html>

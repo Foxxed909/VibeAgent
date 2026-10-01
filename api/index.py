@@ -10,6 +10,7 @@ class handler(BaseHTTPRequestHandler):
             "service": "VibeAgent",
             "routes": [
                 "GET  /api",
+                "GET  /api/capabilities",
                 "POST /api/scan",
                 "POST /api/stream  (SSE live events)",
                 "GET  /api/job?id=",
