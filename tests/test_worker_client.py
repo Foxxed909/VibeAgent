@@ -4,7 +4,10 @@ import os
 import unittest
 from unittest.mock import patch
 
+from agent import orchestrator
+from agent.scope import Authorization, CONFIRM_PHRASE
 from agent.worker_client import (
+    WorkerError,
     get_worker_config,
     native_breakagent_enabled,
     native_worker_capabilities,
@@ -13,6 +16,56 @@ from agent.worker_client import (
     target_host,
     target_is_worker_allowed,
 )
+
+
+class WorkerDispatchTests(unittest.TestCase):
+    def _auth(self):
+        return Authorization(
+            tier="hobby",
+            targets=["https://app.example.com"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Example",
+        ).validated()
+
+    def test_remote_dispatch_uses_worker_backend(self):
+        with patch.object(
+            orchestrator,
+            "run_remote_audit_tool",
+            return_value={"returncode": 0, "stdout": "native", "stderr": "", "findings": []},
+        ):
+            result = orchestrator._dispatch_tool(
+                "vibe_headers",
+                {"url": "https://app.example.com"},
+                self._auth(),
+                worker_tools={"vibe_headers"},
+            )
+        self.assertEqual("vibehacking-worker", result["backend"])
+        self.assertEqual("native", result["stdout"])
+
+    def test_remote_failure_falls_back_to_portable(self):
+        with patch.object(
+            orchestrator,
+            "run_remote_audit_tool",
+            side_effect=WorkerError("worker down"),
+        ), patch.object(
+            orchestrator,
+            "run_builtin",
+            return_value={"returncode": 0, "stdout": "portable", "stderr": ""},
+        ):
+            result = orchestrator._dispatch_tool(
+                "vibe_headers",
+                {"url": "https://app.example.com"},
+                self._auth(),
+                worker_tools={"vibe_headers"},
+            )
+        self.assertEqual("portable", result["backend"])
+        self.assertIn("WORKER_FALLBACK", result["stdout"])
+        self.assertIn("worker down", result["worker_error"])
+
+    def test_native_api_finder_redacted_host_preserves_follow_up(self):
+        output = "[12:00:00] [HACK] FOUND — https://<host>/api/v1/users"
+        hits = orchestrator._parse_api_hits("https://app.example.com", output)
+        self.assertEqual(["https://app.example.com/api/v1/users"], hits)
 
 
 class WorkerClientTests(unittest.TestCase):
