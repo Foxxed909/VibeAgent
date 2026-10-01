@@ -42,11 +42,16 @@
     .error { color: var(--danger); font-size: 0.9rem; margin-bottom: 12px; }
     .success { color: var(--accent); font-size: 0.9rem; margin-top: 16px; }
     .back { display: inline-block; margin-bottom: 24px; color: var(--text-muted); font-size: 0.9rem; }
-    .trial-box {
-      background: var(--accent-dim); border: 1px solid rgba(34,197,94,0.3);
-      border-radius: 8px; padding: 14px 16px; margin-bottom: 24px; font-size: 0.9rem;
+    .verify-box {
+      display: none; background: var(--accent-dim); border: 1px solid rgba(34,197,94,0.28);
+      border-radius: 8px; padding: 14px 16px; margin: -6px 0 20px; font-size: 0.85rem;
     }
-    .trial-box code { font-family: var(--mono); font-size: 0.8rem; word-break: break-all; }
+    .verify-box code { font-family: var(--mono); word-break: break-all; color: var(--accent); }
+    .verify-actions { display:flex; gap:8px; margin-top:12px; }
+    .verify-actions button {
+      flex:1; padding:9px 10px; border-radius:7px; border:1px solid var(--border);
+      background:#111; color:var(--text); cursor:pointer; font-weight:600;
+    }
     .check { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 18px; font-size: 0.85rem; color: var(--text-muted); }
     .check input { width: auto; margin: 4px 0 0; }
   </style>
@@ -56,11 +61,6 @@
     <a class="back" href="/">← VibeAgent</a>
     <h1>Start a scan</h1>
     <p class="sub">Exact targets only. Live agent stream opens as soon as you launch.</p>
-
-    <div class="trial-box">
-      <strong>Trial / friends access</strong><br/>
-      Code: <code>9954FA-67£54CD-GROKJAILEDBROKE£D</code>
-    </div>
 
     <label>Agent</label>
     <div class="agent-toggle">
@@ -75,8 +75,9 @@
     </div>
 
     <form id="scan-form">
-      <label for="access_code">Access code (optional)</label>
-      <input id="access_code" name="access_code" placeholder="9954FA-67£54CD-GROKJAILEDBROKE£D" autocomplete="off" />
+      <label for="access_code">Private invite code (optional)</label>
+      <input id="access_code" name="access_code" placeholder="Enter a private invite if you have one" autocomplete="off" />
+      <p class="hint">Invite codes are private and validated only on the server.</p>
 
       <div id="hobby-fields">
         <label for="app_name">App / project name</label>
@@ -102,6 +103,20 @@
         <option value="native-worker" id="native-worker-option" disabled>Native VibeHacking worker</option>
       </select>
       <p class="hint" id="backend-hint">Portable mode uses the bounded serverless tool implementations.</p>
+      <div class="verify-box" id="verify-box">
+        <strong>Verify ownership for Native Worker</strong>
+        <p id="verify-message" style="margin-top:6px;color:var(--text-muted)">
+          This exact host is allowlisted but needs a one-time ownership proof.
+        </p>
+        <div id="verify-challenge" style="display:none;margin-top:10px">
+          Put this exact token at <code>/.well-known/vibeagent-verification.txt</code>:
+          <div><code id="verify-token"></code></div>
+        </div>
+        <div class="verify-actions">
+          <button type="button" id="create-verify">Create challenge</button>
+          <button type="button" id="confirm-verify">Confirm verification</button>
+        </div>
+      </div>
 
       <label for="depth">Depth</label>
       <select id="depth" name="depth">
@@ -143,7 +158,6 @@
 
   <script>
     const CONFIRM = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS";
-    const TRIAL_CODE = "9954FA-67£54CD-GROKJAILEDBROKE£D";
     let tier = "hobby";
     let agentMode = "vibe";
     const vibeBtn = document.querySelector('[data-agent="vibe"]');
@@ -153,6 +167,10 @@
     const backendSelect = document.getElementById("execution_backend");
     const nativeOption = document.getElementById("native-worker-option");
     const backendHint = document.getElementById("backend-hint");
+    const verifyBox = document.getElementById("verify-box");
+    const verifyMessage = document.getElementById("verify-message");
+    const verifyChallenge = document.getElementById("verify-challenge");
+    const verifyToken = document.getElementById("verify-token");
     let capabilityTimer = null;
 
     function updateStressState() {
@@ -172,6 +190,7 @@
       nativeOption.disabled = true;
       if (targets.length !== 1) {
         if (backendSelect.value === "native-worker") backendSelect.value = "portable";
+        verifyBox.style.display = "none";
         backendHint.textContent = targets.length > 1
           ? "Native worker currently requires exactly one server-approved target per job."
           : "Portable mode uses the bounded serverless tool implementations.";
@@ -186,15 +205,20 @@
         const data = await res.json();
         const native = data.native_worker || {};
         nativeOption.disabled = !native.can_launch;
+        verifyBox.style.display = native.allowlisted && !native.ownership_verified ? "block" : "none";
         if (native.can_launch) {
-          backendHint.textContent = "Native worker is available for this exact approved target" +
+          backendHint.textContent = "Native worker is available for this verified, exact approved target" +
             (native.model ? " · model " + native.model : "") + ".";
+        } else if (native.allowlisted && !native.ownership_verified) {
+          if (backendSelect.value === "native-worker") backendSelect.value = "portable";
+          backendHint.textContent = "Native worker is allowlisted, but ownership verification is still required.";
         } else {
           if (backendSelect.value === "native-worker") backendSelect.value = "portable";
           backendHint.textContent = native.message || "Native worker is not available for this target.";
         }
       } catch {
         if (backendSelect.value === "native-worker") backendSelect.value = "portable";
+        verifyBox.style.display = "none";
         backendHint.textContent = "Could not verify native-worker availability; using portable mode.";
       }
       updateStressState();
@@ -250,6 +274,41 @@
     };
     document.getElementById("targets").addEventListener("input", queueCapabilityRefresh);
 
+    async function verificationRequest(action) {
+      const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
+      if (targets.length !== 1) {
+        verifyMessage.textContent = "Enter exactly one target first.";
+        return;
+      }
+      verifyMessage.textContent = action === "challenge" ? "Creating challenge…" : "Checking verification file…";
+      try {
+        const res = await fetch("/api/verify_target", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: targets[0], action }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          verifyMessage.textContent = data.error || "Verification failed.";
+          return;
+        }
+        if (action === "challenge") {
+          verifyToken.textContent = data.token || "";
+          verifyChallenge.style.display = "block";
+          verifyMessage.textContent = "Challenge created. Publish the token, then tap Confirm verification.";
+        } else {
+          verifyMessage.textContent = "Ownership verified. Native Worker is now available for this host.";
+          verifyChallenge.style.display = "none";
+          await refreshNativeAvailability();
+        }
+      } catch {
+        verifyMessage.textContent = "Could not reach the verification service.";
+      }
+    }
+
+    document.getElementById("create-verify").onclick = () => verificationRequest("challenge");
+    document.getElementById("confirm-verify").onclick = () => verificationRequest("confirm");
+
     document.getElementById("scan-form").onsubmit = (e) => {
       e.preventDefault();
       const err = document.getElementById("error");
@@ -257,10 +316,7 @@
       err.hidden = true; ok.hidden = true;
 
       const accessCode = document.getElementById("access_code").value.trim();
-      const isTrial = accessCode === TRIAL_CODE;
-      if (accessCode && !isTrial) {
-        err.textContent = "Invalid access code."; err.hidden = false; return;
-      }
+      const hasInvite = Boolean(accessCode);
       const confirm = document.getElementById("confirm").value.trim();
       if (confirm !== CONFIRM) {
         err.textContent = "Confirmation phrase does not match."; err.hidden = false; return;
@@ -268,9 +324,9 @@
       const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
       if (!targets.length) { err.textContent = "Add at least one target."; err.hidden = false; return; }
 
-      const effectiveTier = isTrial ? "hobby" : tier;
+      const effectiveTier = tier;
       let depth = document.getElementById("depth").value || "standard";
-      if (effectiveTier === "hobby" && !isTrial && depth === "deep") {
+      if (effectiveTier === "hobby" && !hasInvite && depth === "deep") {
         depth = "standard";
       }
 
@@ -290,8 +346,7 @@
         tier: effectiveTier,
         targets,
         confirmation: confirm,
-        access_code: isTrial ? accessCode : null,
-        trial: isTrial,
+        access_code: accessCode || null,
         app_name: document.getElementById("app_name").value.trim(),
         company_name: document.getElementById("company_name").value.trim(),
         contact_email: document.getElementById("contact_email").value.trim(),
@@ -301,7 +356,7 @@
         stress_mode: stressOrg ? "org" : "capped",
         cookie: document.getElementById("cookie").value.trim() || null,
       };
-      if (payload.stress_multiplier && !(isTrial || effectiveTier === "enterprise")) {
+      if (payload.stress_multiplier && !(hasInvite || effectiveTier === "enterprise")) {
         err.textContent = "Stress requires Enterprise or trial code."; err.hidden = false; return;
       }
 
