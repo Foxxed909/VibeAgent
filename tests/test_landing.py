@@ -21,6 +21,8 @@ class LandingPageTests(unittest.TestCase):
         self.assertIn("execution_backend: executionBackend", html)
         self.assertIn('value="worker-tools"', html)
         self.assertIn('location.href = "/thread?live=1"', html)
+        self.assertIn("/api/verify_target", html)
+        self.assertNotIn("9954FA", html)
 
     def test_thread_page_renders_dynamic_agent_identity(self):
         html = (ROOT / "thread.html").read_text(encoding="utf-8")
@@ -35,7 +37,8 @@ class LandingPageTests(unittest.TestCase):
 
     def test_landing_copy_matches_current_agent_surface(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
-        self.assertIn("Expanded autonomous VibeAgent audit toolset", html)
+        self.assertIn("Two agents. Local or worker-backed tools. One evidence model.", html)
+        self.assertIn('href="/app"', html)
         self.assertNotIn("Full VibeHacking tool surface", html)
 
 
