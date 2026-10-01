@@ -156,9 +156,11 @@ def _run_job_impl(
         ]
         if execution_backend == "native-worker":
             report["native_worker_capabilities"] = native_worker_capabilities(auth.targets, agent_mode=agent_mode)
-            report["native_worker_capabilities"]["ownership_verified"] = (
-                len(auth.targets) == 1 and is_target_verified(auth.targets[0])
-            )
+            ownership_verified = len(auth.targets) == 1 and is_target_verified(auth.targets[0])
+            report["native_worker_capabilities"]["ownership_verified"] = ownership_verified
+            report["native_worker_capabilities"]["can_launch"] = bool(
+                report["native_worker_capabilities"].get("can_launch")
+            ) and ownership_verified
         report["status"] = "dry_run_ok"
         emit("done", status="dry_run_ok")
         return report
