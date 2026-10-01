@@ -75,6 +75,13 @@ class WorkerClientTests(unittest.TestCase):
         self.assertIsNone(handler.redirect_request(None, None, 302, "Found", {}, "https://other.example"))
 
 
+class NativeOutputCompatibilityTests(unittest.TestCase):
+    def test_native_api_finder_redacted_host_preserves_follow_up(self):
+        output = "[12:00:00] [🔥 HACK] FOUND — https://<host>/api/v1/users"
+        hits = orchestrator._parse_api_hits("https://demo.vercel.app", output)
+        self.assertEqual(["https://demo.vercel.app/api/v1/users"], hits)
+
+
 class WorkerBackendTests(unittest.TestCase):
     def _auth(self):
         return Authorization(
