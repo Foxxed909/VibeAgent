@@ -122,9 +122,9 @@
       <select id="depth" name="depth">
         <option value="quick">Quick — ~4 rounds</option>
         <option value="standard" selected>Standard — 12 rounds</option>
-        <option value="deep" id="depth-deep">Deep — 15 rounds (Enterprise / trial)</option>
+        <option value="deep" id="depth-deep">Deep — 15 rounds (Enterprise / private invite)</option>
       </select>
-      <p class="hint">Hobby without trial code: Quick + Standard only.</p>
+      <p class="hint">Hobby without a private invite: Quick + Standard only.</p>
 
       <label for="stress">Authorized stress</label>
       <select id="stress" name="stress">
@@ -134,7 +134,7 @@
         <option value="20">x20</option>
         <option value="50" id="stress-50" disabled>x50 (Enterprise org-managed)</option>
       </select>
-      <p class="hint">Requires Enterprise or trial code. Default mode is platform-capped.</p>
+      <p class="hint">Requires Enterprise or a valid private invite. Default mode is platform-capped.</p>
 
       <div id="stress-mode-wrap" class="enterprise-only">
         <label class="check">
@@ -357,7 +357,7 @@
         cookie: document.getElementById("cookie").value.trim() || null,
       };
       if (payload.stress_multiplier && !(hasInvite || effectiveTier === "enterprise")) {
-        err.textContent = "Stress requires Enterprise or trial code."; err.hidden = false; return;
+        err.textContent = "Stress requires Enterprise or a valid private invite."; err.hidden = false; return;
       }
 
       const btn = document.getElementById("submit");
