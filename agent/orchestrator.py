@@ -15,7 +15,7 @@ from .models import chat, OpenRouterError
 from .scope import Authorization, ScopeError, assert_url_in_scope, CONFIRM_PHRASE, is_valid_trial_code
 from .tools_catalog import (agent_name, get_forced_tools, get_system_prompt, get_tool_catalog, normalize_agent_mode)
 from .depth import get_depth, DepthProfile
-from .findings import add_finding, finding_from_line, severity_counts
+from .findings import add_finding, finding_from_line, finding_from_native, severity_counts
 from .worker_client import (
     WorkerError,
     get_capabilities as get_worker_capabilities,
@@ -282,6 +282,8 @@ def run_job(
                     backend=result.get("backend"),
                     preview=(out or "")[:2500],
                 )
+                native_count = _harvest_native_findings(name, result, report, emit, args=args)
+            if not native_count:
                 _harvest_findings(name, out, report, emit, args=args)
                 messages.append({"role": "tool", "tool_call_id": tc_id, "content": (out or "")[:6000]})
             except ScopeError as e:
@@ -354,7 +356,9 @@ def _run_one_tool(
                 backend=result.get("backend"),
                 preview=(out or "")[:2500],
             )
-            _harvest_findings(name, out, report, emit, args=args)
+            native_count = _harvest_native_findings(name, result, report, emit, args=args)
+            if not native_count:
+                _harvest_findings(name, out, report, emit, args=args)
             if "[CHALLENGE]" in (out or ""):
                 emit("finding", severity="info", detail=f"Bot/CDN challenge during {name}")
             return
@@ -398,6 +402,46 @@ def _parse_api_hits(base: str, stdout: str) -> List[str]:
             continue
         hits.append(urljoin(base.rstrip("/") + "/", path.lstrip("/")))
     return hits[:12]
+
+
+def _harvest_native_findings(
+    name: str,
+    result: Dict[str, Any],
+    report: Dict[str, Any],
+    emit,
+    *,
+    args: Optional[Dict[str, Any]] = None,
+) -> int:
+    raw_findings = result.get("findings") or []
+    if not isinstance(raw_findings, list):
+        return 0
+    added = 0
+    requested_url = str((args or {}).get("url") or "")
+    for item in raw_findings[:50]:
+        if not isinstance(item, dict):
+            continue
+        finding = finding_from_native(
+            item,
+            default_tool=name,
+            requested_url=requested_url,
+        )
+        if add_finding(report, finding):
+            added += 1
+            emit(
+                "finding",
+                id=finding.get("id"),
+                title=finding.get("title"),
+                severity=finding.get("severity"),
+                validation_status=finding.get("validation_status"),
+                tool=finding.get("tool"),
+                location=finding.get("location"),
+                evidence=finding.get("evidence"),
+                recommendation=finding.get("recommendation"),
+                cwe=finding.get("cwe"),
+                owasp=finding.get("owasp"),
+                detail=finding.get("evidence"),
+            )
+    return added
 
 
 def _harvest_findings(
@@ -496,6 +540,7 @@ def _dispatch_tool(
                 "returncode": int(remote.get("returncode") or 0),
                 "stdout": str(remote.get("stdout") or "")[-6000:],
                 "stderr": str(remote.get("stderr") or "")[-1000:],
+                "findings": remote.get("findings") if isinstance(remote.get("findings"), list) else [],
             }
         except WorkerError as exc:
             # The worker is an acceleration/backend option, not a single point
