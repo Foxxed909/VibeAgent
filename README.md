@@ -89,7 +89,7 @@ export VIBE_WORKER_TOKEN=replace-with-the-same-random-token-at-least-32-characte
 python TOOLS/live_dashboard.py --host 0.0.0.0 --port 8080
 ```
 
-At scan start, standalone VibeAgent checks `/api/capabilities`. If the worker advertises the protected audit bridge, portable tool calls are executed by full VibeHacking while the standalone LLM loop remains in control. If the worker is unavailable, VibeAgent falls back to its portable implementation instead of aborting the scan.
+At scan start, standalone VibeAgent checks `/api/capabilities`. If the worker advertises the protected audit bridge, portable tool calls are executed by full VibeHacking while the standalone LLM loop remains in control. Structured findings returned by VibeHacking are normalized into the same finding IDs, CWE/OWASP fields and JSON/SARIF exports as portable results. If the worker is unavailable, VibeAgent falls back to its portable implementation instead of aborting the scan.
 
 The remote bridge is intentionally audit-only. It does not expose challenge-bypass, JWT-forging, WAF-evasion, exploit, or load/stress tools.
 
