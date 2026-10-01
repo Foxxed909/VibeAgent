@@ -40,6 +40,8 @@ class LandingPageTests(unittest.TestCase):
         self.assertIn("Two agents. Local or worker-backed tools. One evidence model.", html)
         self.assertIn('href="/app"', html)
         self.assertNotIn("Full VibeHacking tool surface", html)
+        self.assertNotIn("<strong>*.vercel.app</strong> allowed", html)
+        self.assertIn("Exact Vercel app hostnames allowed", html)
 
 
 if __name__ == "__main__":
