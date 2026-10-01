@@ -161,7 +161,7 @@
       const t = ev.type;
       if (t === 'auth_ok') {
         setAgent(ev.agent_name || (ev.agent_mode === 'break' ? 'BreakAgent' : 'VibeAgent'));
-        row('system', '', currentAgent + ' · Authorized · ' + (ev.tier || '') + (ev.trial ? ' · trial' : '') + (ev.depth ? ' · ' + ev.depth : '') + ' · ' + JSON.stringify(ev.targets));
+        row('system', '', currentAgent + ' · ' + (ev.execution_backend || 'portable') + ' · Authorized · ' + (ev.tier || '') + (ev.trial ? ' · trial' : '') + (ev.depth ? ' · ' + ev.depth : '') + ' · ' + JSON.stringify(ev.targets));
       }
       else if (t === 'model_info') setModel(ev.model, ev.provider, ev.reasoning_effort);
       else if (t === 'round') row('system', '', 'Round ' + ev.index + '/' + ev.max);
