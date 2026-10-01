@@ -53,6 +53,8 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def do_OPTIONS(self):
+        if not require_allowed_origin(self):
+            return
         self.send_response(204)
         apply_cors(self)
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
