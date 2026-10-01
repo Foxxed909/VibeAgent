@@ -8,6 +8,8 @@ from agent.worker_client import (
     get_worker_config,
     native_breakagent_enabled,
     native_worker_capabilities,
+    remote_audit_capabilities,
+    run_remote_audit_tool,
     target_host,
     target_is_worker_allowed,
 )
@@ -58,6 +60,54 @@ class WorkerClientTests(unittest.TestCase):
             self.assertTrue(native_breakagent_enabled())
             caps = native_worker_capabilities(["https://app.example.com"], agent_mode="break")
             self.assertTrue(caps["can_launch"])
+
+    def test_remote_audit_capabilities_require_worker_bridge(self):
+        env = {
+            "VIBE_AGENT_WORKER_URL": "https://worker.example.com",
+            "VIBE_AGENT_WORKER_TOKEN": "x" * 32,
+            "VIBE_AGENT_WORKER_ALLOWED_HOSTS": "app.example.com",
+        }
+        worker_caps = {
+            "remote_tool_bridge_configured": True,
+            "remote_tools": ["vibe_headers", "corscan"],
+        }
+        with patch.dict(os.environ, env, clear=True), patch(
+            "agent.worker_client.verify_worker", return_value=worker_caps
+        ):
+            caps = remote_audit_capabilities(["https://app.example.com"])
+        self.assertTrue(caps["can_launch"])
+        self.assertEqual(["corscan", "vibe_headers"], caps["remote_tools"])
+
+    def test_remote_audit_capabilities_reject_unapproved_target(self):
+        env = {
+            "VIBE_AGENT_WORKER_URL": "https://worker.example.com",
+            "VIBE_AGENT_WORKER_TOKEN": "x" * 32,
+            "VIBE_AGENT_WORKER_ALLOWED_HOSTS": "app.example.com",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            caps = remote_audit_capabilities(["https://other.example.com"])
+        self.assertFalse(caps["can_launch"])
+
+    def test_run_remote_audit_tool_uses_protected_endpoint(self):
+        env = {
+            "VIBE_AGENT_WORKER_URL": "https://worker.example.com",
+            "VIBE_AGENT_WORKER_TOKEN": "x" * 32,
+            "VIBE_AGENT_WORKER_ALLOWED_HOSTS": "app.example.com",
+        }
+        with patch.dict(os.environ, env, clear=True), patch(
+            "agent.worker_client._request",
+            return_value={"returncode": 0, "stdout": "ok", "findings": []},
+        ) as req:
+            result = run_remote_audit_tool(
+                "https://app.example.com",
+                "vibe_headers",
+                args={"url": "https://app.example.com"},
+            )
+        self.assertEqual("ok", result["stdout"])
+        args, kwargs = req.call_args
+        self.assertEqual("/api/tools/run", args[1])
+        self.assertEqual("POST", kwargs["method"])
+        self.assertEqual("I AM AUTHORIZED TO TEST THIS TARGET", kwargs["body"]["auth"])
 
     def test_target_host_rejects_wildcards(self):
         self.assertEqual("", target_host("*.vercel.app"))
