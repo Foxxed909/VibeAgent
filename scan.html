@@ -99,7 +99,7 @@
       <label for="execution_backend">Execution backend</label>
       <select id="execution_backend" name="execution_backend">
         <option value="portable">Portable · serverless agent</option>
-        <option value="native-worker" id="native-worker-option" disabled>Native VibeHacking worker</option>
+        <option value="worker-tools" id="worker-tools-option" disabled>VibeHacking worker · autonomous tools</option>
       </select>
       <p class="hint" id="backend-hint">Portable mode uses the bounded serverless tool implementations.</p>
 
@@ -151,14 +151,14 @@
     const hobbyBtn = document.querySelector('[data-tier="hobby"]');
     const entBtn = document.querySelector('[data-tier="enterprise"]');
     const backendSelect = document.getElementById("execution_backend");
-    const nativeOption = document.getElementById("native-worker-option");
+    const workerToolsOption = document.getElementById("worker-tools-option");
     const backendHint = document.getElementById("backend-hint");
     let capabilityTimer = null;
 
     function updateStressState() {
       const stress = document.getElementById("stress");
       const stressOrg = document.getElementById("stress_org");
-      const disabled = agentMode === "break" || backendSelect.value === "native-worker";
+      const disabled = agentMode === "break" || backendSelect.value !== "portable";
       if (disabled) {
         stress.value = "";
         stressOrg.checked = false;
@@ -167,13 +167,13 @@
       stressOrg.disabled = disabled;
     }
 
-    async function refreshNativeAvailability() {
+    async function refreshWorkerAvailability() {
       const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
-      nativeOption.disabled = true;
+      workerToolsOption.disabled = true;
       if (targets.length !== 1) {
-        if (backendSelect.value === "native-worker") backendSelect.value = "portable";
+        if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
         backendHint.textContent = targets.length > 1
-          ? "Native worker currently requires exactly one server-approved target per job."
+          ? "VibeHacking worker tools currently require exactly one server-approved target per job."
           : "Portable mode uses the bounded serverless tool implementations.";
         updateStressState();
         return;
@@ -184,17 +184,17 @@
           "&agent=" + encodeURIComponent(agentMode)
         );
         const data = await res.json();
-        const native = data.native_worker || {};
-        nativeOption.disabled = !native.can_launch;
-        if (native.can_launch) {
-          backendHint.textContent = "Native worker is available for this exact approved target" +
-            (native.model ? " · model " + native.model : "") + ".";
+        const worker = data.worker_tools || {};
+        workerToolsOption.disabled = !worker.can_launch;
+        if (worker.can_launch) {
+          backendHint.textContent = "VibeHacking worker tools are available for this exact approved target" +
+            (worker.tool_count ? " · " + worker.tool_count + " native tools" : "") + ".";
         } else {
-          if (backendSelect.value === "native-worker") backendSelect.value = "portable";
-          backendHint.textContent = native.message || "Native worker is not available for this target.";
+          if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
+          backendHint.textContent = worker.message || "VibeHacking worker tools are not available for this target.";
         }
       } catch {
-        if (backendSelect.value === "native-worker") backendSelect.value = "portable";
+        if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
         backendHint.textContent = "Could not verify native-worker availability; using portable mode.";
       }
       updateStressState();
@@ -202,7 +202,7 @@
 
     function queueCapabilityRefresh() {
       clearTimeout(capabilityTimer);
-      capabilityTimer = setTimeout(refreshNativeAvailability, 300);
+      capabilityTimer = setTimeout(refreshWorkerAvailability, 300);
     }
 
     function setAgent(mode) {
@@ -244,8 +244,8 @@
     entBtn.onclick = () => setTier("enterprise");
     backendSelect.onchange = () => {
       updateStressState();
-      backendHint.textContent = backendSelect.value === "native-worker"
-        ? "Native worker selected. The target must remain on the server-side exact-host allowlist."
+      backendHint.textContent = backendSelect.value === "worker-tools"
+        ? "VibeHacking worker tools selected. The standalone app and worker must both allowlist this exact host."
         : "Portable mode uses the bounded serverless tool implementations.";
     };
     document.getElementById("targets").addEventListener("input", queueCapabilityRefresh);
@@ -275,11 +275,11 @@
       }
 
       const executionBackend = backendSelect.value || "portable";
-      if (executionBackend === "native-worker" && targets.length !== 1) {
-        err.textContent = "Native worker requires exactly one approved target."; err.hidden = false; return;
+      if (executionBackend === "worker-tools" && targets.length !== 1) {
+        err.textContent = "VibeHacking worker tools require exactly one approved target."; err.hidden = false; return;
       }
-      if (executionBackend === "native-worker" && nativeOption.disabled) {
-        err.textContent = "Native worker is not approved for this target / agent mode."; err.hidden = false; return;
+      if (executionBackend === "worker-tools" && workerToolsOption.disabled) {
+        err.textContent = "VibeHacking worker tools are not approved for this target."; err.hidden = false; return;
       }
 
       const stressVal = document.getElementById("stress").value;
