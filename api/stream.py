@@ -17,7 +17,7 @@ if ROOT not in sys.path:
 from agent.scope import Authorization, ScopeError, normalize_target
 from agent.models import OpenRouterError, validate_requested_model
 from agent.orchestrator import run_job
-from agent.job_store import save_job
+from agent.job_store import save_job, ensure_durable_store
 from agent.product import resolve_depth, resolve_stress
 from agent.target_verification import is_target_verified
 from api._security import (
@@ -107,6 +107,11 @@ class handler(BaseHTTPRequestHandler):
             self._json(400, {"ok": False, "error": str(exc)})
             return
         dry = bool(data.get("dry_run"))
+        try:
+            if not dry:
+                ensure_durable_store()
+        except RuntimeError:
+            return self._json(503, {"ok": False, "error": "persistent scan storage is not configured"})
         if not dry and not require_scan_access(self, data.get("access_code")):
             return
         if not dry and (os.environ.get("VIBE_AGENT_REQUIRE_OWNERSHIP", "1").strip().lower() not in {"0", "false", "no"}):
@@ -157,7 +162,8 @@ class handler(BaseHTTPRequestHandler):
             try:
                 save_job(report)
             except Exception:
-                pass
+                send_event({"type": "final", "ok": False, "error": "report persistence failed", "job_id": report.get("job_id")})
+                return
             send_event({"type": "final", "ok": True, "job_id": report.get("job_id"), "report": report})
         except ScopeError as e:
             send_event({"type": "final", "ok": False, "error": str(e)})

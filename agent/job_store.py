@@ -20,6 +20,12 @@ JOBS_DIR = Path(os.environ.get("VIBEAGENT_JOBS_DIR", "/tmp/vibeagent_jobs"))
 KV_URL = (os.environ.get("KV_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL") or "").rstrip("/")
 KV_TOKEN = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN") or ""
 TTL_SECONDS = int(os.environ.get("VIBEAGENT_JOB_TTL", "86400"))  # 24h
+
+
+def ensure_durable_store() -> None:
+    """Hosted scans must not rely on ephemeral instance storage."""
+    if (os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV")) and not _kv_enabled():
+        raise RuntimeError("KV/Upstash durable storage is required for hosted scans")
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
 
@@ -60,24 +66,21 @@ def save_job(report: Dict[str, Any]) -> str:
         raise ValueError("invalid job_id")
     payload = json.dumps(report)
 
+    ensure_durable_store()
     if _kv_enabled():
-        try:
-            # SET key value EX ttl
-            _kv_command("SET", _kv_key(job_id), payload, "EX", TTL_SECONDS)
-            _kv_command("LREM", JOBS_INDEX_KEY, 0, job_id)
-            _kv_command("LPUSH", JOBS_INDEX_KEY, job_id)
-            _kv_command("LTRIM", JOBS_INDEX_KEY, 0, 99)
-        except Exception as e:
-            # fall through to filesystem
-            report.setdefault("errors", []).append(f"KV save failed: {e}")
+        _kv_command("SET", _kv_key(job_id), payload, "EX", TTL_SECONDS)
+        _kv_command("LREM", JOBS_INDEX_KEY, 0, job_id)
+        _kv_command("LPUSH", JOBS_INDEX_KEY, job_id)
+        _kv_command("LTRIM", JOBS_INDEX_KEY, 0, 99)
+        return _kv_key(job_id)
 
     try:
         JOBS_DIR.mkdir(parents=True, exist_ok=True)
         path = JOBS_DIR / f"{job_id}.json"
         path.write_text(payload, encoding="utf-8")
         return str(path)
-    except Exception:
-        return ""
+    except Exception as exc:
+        raise RuntimeError("Local report persistence failed") from exc
 
 
 def load_job(job_id: str) -> Optional[Dict[str, Any]]:

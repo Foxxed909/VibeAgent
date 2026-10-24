@@ -277,6 +277,7 @@
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
+        let terminalEvent = false;
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
@@ -288,9 +289,15 @@
             if (!line) continue;
             try {
               const ev = JSON.parse(line.slice(6));
+              if (ev.type === 'final') terminalEvent = true;
               handleEvent(ev);
             } catch {}
           }
+        }
+        if (!terminalEvent) {
+          statusEl.textContent = 'interrupted';
+          statusEl.className = 'badge error';
+          row('finding', 'error', 'Stream ended without a final result. Assessment outcome is unknown.');
         }
       } catch (e) {
         requestBody = '';

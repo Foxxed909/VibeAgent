@@ -13,7 +13,7 @@ if ROOT not in sys.path:
 from agent.scope import Authorization, ScopeError, normalize_target
 from agent.models import OpenRouterError, validate_requested_model
 from agent.orchestrator import run_job
-from agent.job_store import save_job, backend_name
+from agent.job_store import save_job, backend_name, ensure_durable_store
 from agent.product import resolve_depth, resolve_stress
 from agent.target_verification import is_target_verified
 from api._security import (
@@ -78,6 +78,11 @@ class handler(BaseHTTPRequestHandler):
             access_code=data.get("access_code") or None,
         )
         dry = bool(data.get("dry_run"))
+        try:
+            if not dry:
+                ensure_durable_store()
+        except RuntimeError:
+            return self._json(503, {"ok": False, "error": "persistent scan storage is not configured"})
         if not dry and not require_scan_access(self, data.get("access_code")):
             return
         try:
@@ -116,7 +121,7 @@ class handler(BaseHTTPRequestHandler):
             try:
                 save_job(report)
             except Exception:
-                pass
+                return self._json(503, {"ok": False, "error": "report persistence failed", "job_id": report.get("job_id")})
             return self._json(200, {
                 "ok": True,
                 "job_id": report.get("job_id"),

@@ -78,7 +78,7 @@ def main(argv=None) -> int:
     if args.save:
         save_job(report)
     print(json.dumps(report, indent=2, default=str))
-    return 0
+    return 0 if report.get("status") in {"completed", "dry_run_ok"} else 1
 
 
 if __name__ == "__main__":

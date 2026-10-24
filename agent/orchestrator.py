@@ -243,6 +243,8 @@ def _run_job_impl(
     if execution_backend == "native-worker":
         return _run_native_worker_job(auth, report, emit, agent_mode, active_agent, ownership_proofs=ownership_proofs)
 
+    model_investigation_ok = False
+    model_synthesis_ok = not profile.require_final_report
     if stress_multiplier:
         if execution_backend == "worker-tools":
             emit("error", text="Stress mode is not available through the bounded worker-tools backend.")
@@ -357,6 +359,7 @@ def _run_job_impl(
             emit("error", text=str(e))
             break
 
+        model_investigation_ok = True
         meta = completion.get("_vibeagent") or {}
         if meta.get("model") and not report.get("model"):
             report["model"] = meta.get("model")
@@ -429,6 +432,8 @@ def _run_job_impl(
                 calls_executed_this_round += 1
                 report["tool_calls"].append({"tool": name, "args": args, "result": result})
                 out = result.get("stdout") or result.get("message") or json.dumps(result)[:3000]
+                if result.get("stub") or int(result.get("returncode") or 0) != 0:
+                    report["errors"].append(f"Tool {name} failed: {str(result.get('stderr') or out)[:350]}")
                 emit(
                     "tool_result",
                     tool=name,
@@ -436,9 +441,10 @@ def _run_job_impl(
                     backend=result.get("backend"),
                     preview=(out or "")[:2500],
                 )
-                native_count = _harvest_worker_findings(name, result, report, emit, args=args)
-                if not native_count:
-                    _harvest_findings(name, out, report, emit, args=args)
+                if not result.get("stub") and int(result.get("returncode") or 0) == 0:
+                    native_count = _harvest_worker_findings(name, result, report, emit, args=args)
+                    if not native_count:
+                        _harvest_findings(name, out, report, emit, args=args)
                 messages.append({"role": "tool", "tool_call_id": tc_id, "content": (out or "")[:6000]})
             except ScopeError as e:
                 report["errors"].append(f"Scope violation blocked: {e}")
@@ -542,6 +548,7 @@ def _run_job_impl(
             choice = (completion.get("choices") or [{}])[0]
             content = (choice.get("message") or {}).get("content")
             if content:
+                model_synthesis_ok = True
                 report["report_text"] = content
                 emit("agent_message", text=content[:8000])
         except Exception as e:
@@ -549,15 +556,20 @@ def _run_job_impl(
             report["report_text"] = _local_findings_fallback(report)
             emit("agent_message", text=report["report_text"])
 
-    report["status"] = "completed"
-    report["loop"]["phase"] = "completed"
-    report["loop"]["stop_reason"] = report["loop"].get("stop_reason") or "completed"
+    if not model_investigation_ok:
+        report["status"] = "failed"
+    elif not model_synthesis_ok:
+        report["status"] = "partial"
+    else:
+        report["status"] = "completed"
+    report["loop"]["phase"] = report["status"]
+    report["loop"]["stop_reason"] = report["loop"].get("stop_reason") or report["status"]
     report["summary"] = {
         "total_findings": len(report["findings"]),
         "severity": severity_counts(report),
         "errors": len(report.get("errors") or []),
     }
-    emit("done", status="completed", findings=len(report["findings"]), summary=report["summary"])
+    emit("done", status=report["status"], findings=len(report["findings"]), summary=report["summary"])
     return report
 
 
@@ -782,6 +794,8 @@ def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile, *, work
             result = _dispatch_tool(name, args, auth, profile, worker_tools=worker_tools)
             report["tool_calls"].append({"tool": name, "args": args, "result": result})
             out = result.get("stdout") or result.get("message") or json.dumps(result)[:3000]
+            if result.get("stub") or int(result.get("returncode") or 0) != 0:
+                report["errors"].append(f"Tool {name} failed: {str(result.get('stderr') or out)[:350]}")
             emit(
                 "tool_result",
                 tool=name,
@@ -789,9 +803,10 @@ def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile, *, work
                 backend=result.get("backend"),
                 preview=(out or "")[:2500],
             )
-            native_count = _harvest_worker_findings(name, result, report, emit, args=args)
-            if not native_count:
-                _harvest_findings(name, out, report, emit, args=args)
+            if not result.get("stub") and int(result.get("returncode") or 0) == 0:
+                native_count = _harvest_worker_findings(name, result, report, emit, args=args)
+                if not native_count:
+                    _harvest_findings(name, out, report, emit, args=args)
             if "[CHALLENGE]" in (out or ""):
                 emit("finding", severity="info", detail=f"Bot/CDN challenge during {name}")
             return
@@ -978,8 +993,9 @@ def _dispatch_tool(
         return builtin
     return {
         "backend": "portable",
+        "returncode": 1,
         "stub": True,
-        "message": f"Tool {name} acknowledged for {url}.",
+        "message": f"Tool {name} is not implemented by the selected execution backend for {url}.",
         "worker_error": worker_error or None,
     }
 

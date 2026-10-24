@@ -65,8 +65,14 @@ class handler(BaseHTTPRequestHandler):
         except (UnicodeDecodeError, json.JSONDecodeError):
             return self._json(400, {"ok": False, "error": "invalid JSON"})
 
-        email = (data.get("email") or "").strip().lower()
-        tier = (data.get("tier") or "hobby").strip().lower()
+        if not isinstance(data, dict):
+            return self._json(400, {"ok": False, "error": "JSON body must be an object"})
+        email_raw = data.get("email")
+        tier_raw = data.get("tier", "hobby")
+        if not isinstance(email_raw, str) or not isinstance(tier_raw, str):
+            return self._json(400, {"ok": False, "error": "email and tier must be strings"})
+        email = email_raw.strip().lower()
+        tier = tier_raw.strip().lower()
         if not EMAIL_RE.match(email):
             return self._json(400, {"ok": False, "error": "valid email required"})
         if len(email) > 254:
