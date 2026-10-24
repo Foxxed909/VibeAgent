@@ -589,6 +589,7 @@ def _run_job_impl(
             report["report_text"] = _local_findings_fallback(report)
             emit("agent_message", text=report["report_text"])
 
+    check_cancel()
     if not model_investigation_ok:
         report["status"] = "failed"
     elif investigation_interrupted or not model_synthesis_ok:
