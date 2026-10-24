@@ -78,6 +78,9 @@
       <label for="access_code">Private invite code (optional)</label>
       <input id="access_code" name="access_code" placeholder="Enter a private invite if you have one" autocomplete="off" />
       <p class="hint">Invite codes are private and validated only on the server.</p>
+      <label for="scan_api_token">Self-hosted scan API token (alternative to an invite)</label>
+      <input id="scan_api_token" name="scan_api_token" type="password" autocomplete="new-password" spellcheck="false" placeholder="VIBE_AGENT_API_TOKEN from your Vercel project" />
+      <p class="hint">For deployments you control: enter the matching VIBE_AGENT_API_TOKEN. Sent in the X-VibeAgent-Token header, never saved in reports. This is not a Vercel account token.</p>
 
       <div id="hobby-fields">
         <label for="app_name">App / project name</label>
@@ -427,6 +430,7 @@
       err.hidden = true; ok.hidden = true;
 
       const accessCode = document.getElementById("access_code").value.trim();
+      const scanApiToken = document.getElementById("scan_api_token").value.trim();
       const hasInvite = Boolean(accessCode);
       const confirm = document.getElementById("confirm").value.trim();
       if (confirm !== CONFIRM) {
@@ -507,7 +511,7 @@
         try {
           const response = await fetch("/api/queue", {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
+            headers: {"Content-Type": "application/json", ...(scanApiToken ? {"X-VibeAgent-Token": scanApiToken} : {})},
             body: JSON.stringify(payload)
           });
           const body = await response.json();
@@ -528,8 +532,11 @@
       ok.textContent = "Opening live thread…";
       ok.hidden = false;
 
-      // Store payload so thread can start SSE
+      // The token is needed only to authorize the next same-tab live request.
+      // It is removed from sessionStorage immediately when /thread starts.
+      if (scanApiToken) payload.scan_api_token = scanApiToken;
       sessionStorage.setItem("vibeagent_pending_scan", JSON.stringify(payload));
+      document.getElementById("scan_api_token").value = "";
       document.getElementById("openai_api_key").value = "";
       document.getElementById("google_api_key").value = "";
       document.getElementById("openrouter_api_key").value = "";
