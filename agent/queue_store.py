@@ -109,7 +109,7 @@ def enqueue(auth: Authorization, *, model: str, depth: str, mode: str,
         "app_name": auth.app_name, "company_name": auth.company_name,
         "model": model, "depth": depth, "agent_mode": mode,
         "agent_name": "BreakAgent" if mode == "break" else "VibeAgent",
-        "execution_backend": execution_backend, "status": "queued",
+        "execution_backend": execution_backend, "status": "queued", "queue_mode": True,
         "created_at": task["created_at"], "events": [], "findings": [], "errors": [],
         "summary": {"total_findings": 0, "severity": {}, "errors": 0},
     }
