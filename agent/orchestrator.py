@@ -244,6 +244,7 @@ def _run_job_impl(
         return _run_native_worker_job(auth, report, emit, agent_mode, active_agent, ownership_proofs=ownership_proofs)
 
     model_investigation_ok = False
+    investigation_interrupted = False
     model_synthesis_ok = not profile.require_final_report
     if stress_multiplier:
         if execution_backend == "worker-tools":
@@ -355,11 +356,11 @@ def _run_job_impl(
                 purpose="investigation",
             )
         except (OpenRouterError, OpenAIError) as e:
+            investigation_interrupted = True
             report["errors"].append(str(e))
             emit("error", text=str(e))
             break
 
-        model_investigation_ok = True
         meta = completion.get("_vibeagent") or {}
         if meta.get("model") and not report.get("model"):
             report["model"] = meta.get("model")
@@ -369,6 +370,12 @@ def _run_job_impl(
 
         choices = completion.get("choices") or []
         choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+        if not choice:
+            investigation_interrupted = True
+            report["errors"].append("No usable investigation response from model")
+            emit("error", text="No usable investigation response from model")
+            break
+        model_investigation_ok = True
         message = choice.get("message") or {}
         if not isinstance(message, dict):
             message = {}
@@ -566,7 +573,7 @@ def _run_job_impl(
 
     if not model_investigation_ok:
         report["status"] = "failed"
-    elif not model_synthesis_ok:
+    elif investigation_interrupted or not model_synthesis_ok:
         report["status"] = "partial"
     else:
         report["status"] = "completed"
