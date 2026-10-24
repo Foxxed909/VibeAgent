@@ -169,6 +169,30 @@ def heartbeat(job_id: str, worker_id: str, lease_seconds: int = 300) -> bool:
     return bool(job_store._kv_command("EVAL", script, 1, _key("lease", job_id), worker_id, lease_seconds))
 
 
+def save_report_if_owned(job_id: str, worker_id: str, report: Dict[str, Any]) -> bool:
+    """Atomically publish a worker's result only while its lease remains valid.
+
+    A delayed or disconnected worker cannot overwrite an orphan-recovery
+    failure after the Redis lease has expired.
+    """
+    if str(report.get("job_id") or "") != job_id:
+        raise ValueError("report/job id mismatch")
+    script = (
+        "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end; "
+        "redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3]); "
+        "redis.call('LREM', KEYS[3], 0, ARGV[4]); "
+        "redis.call('LPUSH', KEYS[3], ARGV[4]); "
+        "redis.call('LTRIM', KEYS[3], 0, 99); "
+        "return 1"
+    )
+    payload = json.dumps(report, default=str)
+    result = job_store._kv_command(
+        "EVAL", script, 3, _key("lease", job_id), job_store._kv_key(job_id),
+        job_store.JOBS_INDEX_KEY, worker_id, payload, job_store.TTL_SECONDS, job_id,
+    )
+    return result == 1 or result == "1"
+
+
 def complete_claim(job_id: str, worker_id: str) -> None:
     script = ("if redis.call('GET', KEYS[1]) == ARGV[1] then "
               "return redis.call('DEL', KEYS[1]) else return 0 end")
