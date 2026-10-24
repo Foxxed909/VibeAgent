@@ -253,6 +253,7 @@ def _run_job_impl(
         return report
 
     if execution_backend == "native-worker":
+        check_cancel()
         return _run_native_worker_job(auth, report, emit, agent_mode, active_agent, ownership_proofs=ownership_proofs)
 
     model_investigation_ok = False
