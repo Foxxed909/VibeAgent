@@ -154,7 +154,7 @@ def parse_provider_keys(data: dict) -> tuple[Optional[dict[str, str]], Optional[
         raw = {}
     if not isinstance(raw, dict):
         return None, "provider_keys must be an object"
-    unknown = set(raw) - {"openai", "google", "openrouter", "gateway"}
+    unknown = set(raw) - {"openai", "google", "openrouter", "gateway", "nvidia"}
     if unknown:
         return None, "provider_keys contains an unsupported provider"
     clean: dict[str, str] = {}
