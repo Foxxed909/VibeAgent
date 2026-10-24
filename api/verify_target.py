@@ -10,8 +10,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from agent.target_verification import VerificationError, confirm_challenge, create_challenge
-from api._security import apply_cors, read_json_body, require_allowed_origin, require_scan_access
+from agent.target_verification import VerificationError, approve_operator_target, confirm_challenge, create_challenge
+from api._security import apply_cors, read_json_body, require_allowed_origin, require_scan_access, require_operator_scan_access
 
 
 class handler(BaseHTTPRequestHandler):
@@ -34,11 +34,13 @@ class handler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": "invalid JSON"})
         if not isinstance(data, dict):
             return self._json(400, {"ok": False, "error": "JSON body must be an object"})
-        if not require_scan_access(self, data.get("access_code")):
-            return
-
         target = str(data.get("target") or "").strip()
         action = str(data.get("action") or "challenge").strip().lower()
+        if action == "approve":
+            if not require_operator_scan_access(self):
+                return
+        elif not require_scan_access(self, data.get("access_code")):
+            return
         if not target:
             return self._json(400, {"ok": False, "error": "target required"})
         try:
@@ -46,8 +48,10 @@ class handler(BaseHTTPRequestHandler):
                 result = create_challenge(target)
             elif action == "confirm":
                 result = confirm_challenge(target)
+            elif action == "approve":
+                result = approve_operator_target(target)
             else:
-                return self._json(400, {"ok": False, "error": "action must be challenge or confirm"})
+                return self._json(400, {"ok": False, "error": "unsupported verification action"})
         except VerificationError as exc:
             return self._json(400, {"ok": False, "error": str(exc)})
         return self._json(200, {"ok": True, **result})
