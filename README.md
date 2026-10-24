@@ -9,6 +9,41 @@ Both modes share the same model layer, scope enforcement, SSE live thread, job p
 
 The quality loop is bounded and evidence-led: deterministic baseline, model-guided investigation, exact-duplicate suppression, reproducibility review of material findings, optional independent review, then final synthesis. Tool, round, retry and retest budgets are fixed by the selected depth profile. Repeating heuristic evidence alone cannot confirm exploitability. Interrupted model investigations return partial or failed statuses rather than unconditional completion.
 
+## Settings → Keys (bring your own provider)
+
+Each user can open **`/settings` → Keys** from the landing page, security
+workspace or scan form, and add **their own** OpenRouter, OpenAI, NVIDIA
+and optional Google provider keys. The keys are saved only to the **current
+browser tab's `sessionStorage`**, pre-filled into the scan form on that
+same origin, and sent via HTTPS to the service only when launching a scan.
+They are forwarded to the chosen provider and are excluded from scan reports.
+Users can clear all their keys from Settings at any time.
+
+The advanced **self-hosted operator token** is stored separately in that
+same tab. It belongs only to the operator of that person's own deployment
+and is **not a customer login token**. Do not give customers the product
+owner's `VIBE_AGENT_API_TOKEN` or any company secrets.
+
+On a shared customer-facing deployment, set
+`VIBE_AGENT_REQUIRE_CUSTOMER_KEYS=1` to refuse live scans that lack
+their own provider's key, rather than implicitly routing through
+platform-owned model credentials. This setting also blocks the background
+queue (which requires worker-owned credentials) and disables the
+server-configured independent review model, so customer evidence isn't
+silently forwarded to a different provider. Browser-only scans always
+require BYOK regardless of this setting.
+
+**Limitations:** This session-only Settings page is *not* a secure
+multi-organization key vault, login, billing, or tenant RBAC system.
+JavaScript running on the same origin can access session storage. Do
+not use a shared computer or submit employer data without its approval.
+Commercial multi-company use requires an authenticated organization layer,
+organization-specific permissions and scope, encrypted secret storage,
+proper isolation of jobs/reports/billing, and auditable access controls.
+Those capabilities are **not yet implemented**; the shared workspace
+currently uses an administrator-level workspace token. Consider independent
+self-hosted company deployments until that isolation is implemented.
+
 ## Product tiers
 
 - **Hobby** — $50 / scan · exact URLs/hosts only (exact Vercel app hostnames supported) · private invite or API access token required
