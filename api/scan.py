@@ -22,6 +22,8 @@ from api._security import (
     read_json_body,
     require_allowed_origin,
     require_scan_access,
+    customer_keys_required,
+    personal_key_error,
 )
 
 
@@ -89,6 +91,10 @@ class handler(BaseHTTPRequestHandler):
             model = validate_requested_model(data.get("model") or None)
         except OpenRouterError as exc:
             return self._json(400, {"ok": False, "error": str(exc)})
+        if customer_keys_required() and not dry:
+            problem = personal_key_error(model or (os.environ.get("VIBEAGENT_MODEL") or ""), provider_keys)
+            if problem:
+                return self._json(400, {"ok": False, "error": problem})
         depth = resolve_depth(auth.tier, data.get("depth"), auth.access_code)
         stress_m, stress_mode = resolve_stress(
             auth.tier, auth.access_code, data.get("stress_multiplier"), data.get("stress_mode")
