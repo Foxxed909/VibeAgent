@@ -32,7 +32,7 @@ def set_provider_keys(keys: Optional[Mapping[str, str]]):
     clean = {
         provider: value.strip()
         for provider, value in (keys or {}).items()
-        if provider in {"openai", "google", "openrouter", "gateway"}
+        if provider in {"openai", "google", "openrouter", "gateway", "nvidia"}
         and isinstance(value, str)
         and value.strip()
     }
