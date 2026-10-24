@@ -117,6 +117,71 @@ VIBE_AGENT_ALLOWED_MODELS=gpt-6-luna,google/gemini-3-flash
 
 The local CLI also supports OpenAI's documented open-source Sign in with ChatGPT flow. It uses the public Responses API with the signed-in user's own consent and stores its rotating OAuth credentials only on that device. This local flow is not used by Vercel. The remotely hosted Vercel app still uses user-supplied API keys or Gateway credentials unless OpenAI approves the commercial partner integration. Google consumer subscriptions likewise are not stored or scraped; Google models are reached through AI Gateway or a supported provider API.
 
+### NVIDIA Nemotron 3 Ultra 550B (OpenRouter Free or NVIDIA NIM)
+
+Nemotron 3 Ultra is selectable in the scan form and is the **default
+new-scan model**. It is supported in both discovery (VibeAgent) and validation
+(BreakAgent) modes with the existing scope, ownership verification and tool
+allowlists. The agent receives explicit instructions for red-team hypothesis
+formation, attack-path prioritization, negative controls, evidence-only
+validation and precise remediation. This is an *authorized* testing agent,
+not a claim that every security weakness is exploitable.
+
+**Option A — OpenRouter free endpoint**:
+
+- Model: \`nvidia/nemotron-3-ultra-550b-a55b:free\`
+- Key: \`OPENROUTER_API_KEY\` in a trusted environment, or fill the
+  OpenRouter API key field on the scan form.
+- HTTP API: \`https://openrouter.ai/api/v1/chat/completions\`.
+
+**Option B — NVIDIA Build/NIM**:
+
+- Model: \`nvidia/nemotron-3-ultra-550b-a55b\` (no \`:free\` suffix).
+- Key: \`NVIDIA_API_KEY\` in a trusted environment, or fill the
+  NVIDIA API key field on the scan form.
+- HTTP API: \`https://integrate.api.nvidia.com/v1/chat/completions\`.
+
+Selecting the \`:free\` model with **only a NVIDIA key** also routes to
+NVIDIA NIM with the unsuffixed model ID. If an OpenRouter key is present,
+the \`:free\` request goes to OpenRouter. Explicit unsuffixed NVIDIA
+selection always uses NVIDIA and does not silently spend OpenRouter paid
+credits. API keys are request-scoped and are never persisted in the scan
+report; queued scans accept **no BYOK secrets** and instead use the worker
+environment's key. Do not confuse a free API endpoint with unlimited
+capacity: it can be rate-limited or unavailable.
+
+To make Nemotron the CLI/server default **once a provider key is configured**:
+
+\`\`\`bash
+export VIBEAGENT_MODEL='nvidia/nemotron-3-ultra-550b-a55b:free'
+export OPENROUTER_API_KEY='YOUR_OPENROUTER_KEY'
+# or: export NVIDIA_API_KEY='YOUR_NVIDIA_KEY'
+python -m agent.cli --model nvidia/nemotron-3-ultra-550b-a55b:free \
+  --tier hobby --target https://your-owned-app.example \
+  --app-name Demo --confirm 'I OWN OR AM AUTHORIZED TO TEST THESE TARGETS'
+\`\`\`
+
+If \`VIBE_AGENT_ALLOWED_MODELS\` is explicitly configured, include the exact
+Nemotron ID(s) in that allowlist:
+
+\`\`\`text
+VIBE_AGENT_ALLOWED_MODELS=gpt-6-luna,google/gemini-3-flash,nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3-ultra-550b-a55b
+\`\`\`
+
+For direct NVIDIA NIM, its model options enable the model's supported
+reasoning mode. OpenRouter requests enable reasoning for the free Nemotron
+model. Nemotron investigations and synthesis get a higher output-token
+budget to allow deeper analysis; deterministic tool-call limits remain in
+force.
+
+**Important data-handling caveat:** OpenRouter's free Nemotron endpoint
+warns against submitting confidential information or personal data, and
+says requests may be logged. Do not use it to transmit secrets, private
+vulnerability evidence, customer data, or sensitive targets. Consider
+provider terms and organizational data-handling policies before scanning.
+Free-model availability, tool-call behavior and provider quotas are not
+guaranteed. Provider routing and unit tests do not prove a live model run.
+
 ### ChatGPT plan usage in the local CLI
 
 Sign in on the device that will run VibeAgent:
@@ -350,6 +415,7 @@ Enter that token on `/app`; it is retained only in the current browser tab.
 - [x] SSRF-resistant outbound address policy + redirect refusal
 - [x] Scan, workspace and model-selection access boundaries
 - [x] User-selectable GPT-6 Luna / GPT-5.6 Luna in the hosted scan form
+- [x] Nemotron 3 Ultra 550B selectable/default with OpenRouter free and direct NVIDIA NIM provider routes
 - [x] Explicit partial/failed scan statuses, strict hosted persistence, and interrupted-stream indication
 - [x] Multi-target hostname verification controls
 - [ ] Billing
