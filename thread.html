@@ -325,22 +325,17 @@
           body: requestBody,
         });
         if (!res.ok || !res.body) {
-          // fallback to non-stream scan
-          const r2 = await fetch('/api/scan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: requestBody,
-          });
+          // Never silently resubmit a scan to another endpoint: the first
+          // request may already have started a billable assessment.
+          let detail = '';
+          try {
+            const payload = await res.json();
+            detail = payload.error || '';
+          } catch {}
           requestBody = '';
-          const data = await r2.json();
-          if (data.ok && data.report) {
-            sessionStorage.setItem('vibeagent_last_report', JSON.stringify(data.report));
-            renderReport(data.report);
-          } else {
-            row('finding', 'error', (data && data.error) || 'Scan failed');
-            statusEl.textContent = 'error';
-            statusEl.className = 'badge error';
-          }
+          statusEl.textContent = 'error';
+          statusEl.className = 'badge error';
+          row('finding', 'error', detail || 'The streaming request could not start. No retry was submitted.');
           return;
         }
         requestBody = '';
