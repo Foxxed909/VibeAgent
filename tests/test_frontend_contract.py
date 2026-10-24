@@ -143,7 +143,7 @@ const setTimeout = callback => callback();
         for mode in ("vibe", "break"):
             with self.subTest(mode=mode):
                 # Explicitly separate demo from any script that could send a live scan.
-                js = "const demoMode = " + repr(mode) + ";\\n" + harness
+                js = "const demoMode = " + repr(mode) + ";" + chr(10) + harness
                 result = subprocess.run(
                     ["node", "-e", js], capture_output=True, text=True, timeout=15
                 )
