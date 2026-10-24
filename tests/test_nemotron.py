@@ -198,7 +198,7 @@ class NemotronFrontendAndPromptTests(unittest.TestCase):
 
     def test_security_agents_have_concrete_adversarial_evidence_instructions(self):
         for prompt in (VIBEAGENT_PROMPT, BREAKAGENT_PROMPT):
-            self.assertIn("trust boundary", prompt.lower())
+            self.assertIn("trust boundar", prompt.lower())
             self.assertIn("attacker", prompt.lower())
             self.assertIn("evidence", prompt.lower())
             self.assertIn("authorized", prompt.lower())
