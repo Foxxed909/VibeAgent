@@ -149,6 +149,12 @@
       <input id="cookie" name="cookie" placeholder="cf_clearance=…" autocomplete="off" />
       <p class="hint">We do not bypass robot checks. Allowlist or paste your own cookie.</p>
 
+      <label class="check">
+        <input type="checkbox" id="queued_mode" checked />
+        <span><strong>Durable worker mode</strong> — run asynchronously, resume progress and cancel. Requires an online worker and server-side model credentials; no BYOK keys/cookies stored.</span>
+      </label>
+      <p class="hint" id="queued_hint">Queue mode excludes stress/load scans and sends no API keys or cookies to storage. Uncheck for the legacy one-request BYOK stream.</p>
+
       <label for="model">Investigation model</label>
       <select id="model" name="model">
         <option value="gpt-6-luna" selected>GPT-6 Luna</option>
@@ -183,6 +189,16 @@
     const hobbyBtn = document.querySelector('[data-tier="hobby"]');
     const entBtn = document.querySelector('[data-tier="enterprise"]');
     const backendSelect = document.getElementById("execution_backend");
+    const queuedCheckbox = document.getElementById("queued_mode");
+    function syncQueueMode() {
+      document.getElementById("openai_api_key").required = !queuedCheckbox.checked;
+      document.getElementById("openai_api_key").disabled = queuedCheckbox.checked;
+      document.getElementById("google_api_key").disabled = queuedCheckbox.checked;
+      document.getElementById("cookie").disabled = queuedCheckbox.checked;
+      document.getElementById("stress").disabled = queuedCheckbox.checked || agentMode === "break" || backendSelect.value !== "portable";
+      document.getElementById("stress_org").disabled = queuedCheckbox.checked || agentMode === "break" || backendSelect.value !== "portable";
+    }
+    queuedCheckbox.addEventListener("change", syncQueueMode);
     const workerToolsOption = document.getElementById("worker-tools-option");
     const backendHint = document.getElementById("backend-hint");
     const verifyBox = document.getElementById("verify-box");
@@ -206,8 +222,8 @@
         stress.value = "";
         stressOrg.checked = false;
       }
-      stress.disabled = disabled;
-      stressOrg.disabled = disabled;
+      stress.disabled = disabled || queuedCheckbox.checked;
+      stressOrg.disabled = disabled || queuedCheckbox.checked;
     }
 
     async function refreshWorkerAvailability() {
@@ -359,7 +375,7 @@
     document.getElementById("create-verify").onclick = () => verificationRequest("challenge");
     document.getElementById("confirm-verify").onclick = () => verificationRequest("confirm");
 
-    document.getElementById("scan-form").onsubmit = (e) => {
+    document.getElementById("scan-form").onsubmit = async (e) => {
       e.preventDefault();
       const err = document.getElementById("error");
       const ok = document.getElementById("success");
@@ -422,6 +438,33 @@
       }
 
       const btn = document.getElementById("submit");
+      if (queuedCheckbox.checked) {
+        if (payload.stress_multiplier) {
+          err.textContent = "Stress/load testing is not supported in durable queue mode."; err.hidden = false; return;
+        }
+        delete payload.provider_keys;
+        delete payload.cookie;
+        btn.disabled = true;
+        btn.textContent = "Submitting queued assessment…";
+        try {
+          const response = await fetch("/api/queue", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+          });
+          const body = await response.json();
+          if (!response.ok || !body.ok) throw new Error(body.error || "Queue submission failed");
+          sessionStorage.setItem("vibeagent_cancel_" + body.job_id, body.cancel_token);
+          location.href = "/thread?job=" + encodeURIComponent(body.job_id) + "&queued=1";
+          return;
+        } catch (ex) {
+          err.textContent = String(ex.message || ex);
+          err.hidden = false;
+          btn.disabled = false;
+          btn.textContent = "Launch queued assessment";
+          return;
+        }
+      }
       btn.disabled = true;
       btn.textContent = (agentMode === "break" ? "BreakAgent" : "VibeAgent") + " streaming…";
       ok.textContent = "Opening live thread…";
@@ -435,6 +478,7 @@
     };
 
     updateStressState();
+    syncQueueMode();
     queueCapabilityRefresh();
   </script>
 </body>
