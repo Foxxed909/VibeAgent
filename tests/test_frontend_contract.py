@@ -105,6 +105,50 @@ class BrowserContractTests(unittest.TestCase):
         self.assertNotIn("/api/stream", demo)
         self.assertNotIn("setReportLinks(", demo)
 
+    def test_demo_executes_without_fetching_or_storing_anything(self):
+        if not shutil.which("node"):
+            self.skipTest("Node.js unavailable")
+        page = (ROOT / "thread.html").read_text(encoding="utf-8")
+        script = page.split("async function startDemo() {", 1)[1].split("async function startQueue() {", 1)[0]
+        source = "async function startDemo() {" + script
+        harness = """
+let finalReport = null;
+let currentAgent = 'VibeAgent';
+const statusEl = {textContent:'',className:''};
+const demoElements = new Map();
+const document = {getElementById(id){
+  if(!demoElements.has(id)) demoElements.set(id,{textContent:'',hidden:true,onclick:null});
+  return demoElements.get(id);
+}};
+const calls = [];
+const row = (kind,who,content) => calls.push({kind,content});
+const handleEvent = ev => calls.push(ev);
+const setAgent = name => {currentAgent=name;};
+const setModel = () => {};
+const setFindingSummary = () => {};
+const fetch = () => {throw new Error('Demo attempted network call');};
+const sessionStorage = new Proxy({}, {get(){throw new Error('Demo attempted storage access');}});
+const setTimeout = callback => callback();
+""" + source + """
+(async()=>{
+ await startDemo();
+ if (!finalReport || !finalReport.demo || finalReport.findings.length !== 1) throw Error('missing demo report');
+ if (statusEl.textContent !== 'demo complete') throw Error('missing complete status');
+ if (calls.length < 10) throw Error('missing progress events');
+ if (!document.getElementById('demo-json').onclick) throw Error('missing offline download');
+ if (finalReport.targets[0] !== 'https://example.invalid') throw Error('wrong demo target');
+ if (currentAgent !== (demoMode === 'break' ? 'BreakAgent' : 'VibeAgent')) throw Error('wrong agent');
+})().catch(error=>{console.error(error);process.exitCode=1});
+"""
+        for mode in ("vibe", "break"):
+            with self.subTest(mode=mode):
+                # Explicitly separate demo from any script that could send a live scan.
+                js = "const demoMode = " + repr(mode) + ";\\n" + harness
+                result = subprocess.run(
+                    ["node", "-e", js], capture_output=True, text=True, timeout=15
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_browser_inline_scripts_have_valid_javascript(self):
         if not shutil.which("node"):
             self.skipTest("Node.js unavailable")
