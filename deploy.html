@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Self-host VibeAgent with your own API keys, Redis storage and independent Vercel project.">
+<title>Deploy your own VibeAgent</title>
+<style>
+:root{color-scheme:dark;--bg:#07090b;--panel:#111519;--muted:#a3afb7;--stroke:#2b3639;--accent:#5be79b;--text:#effaf4}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -20%,#0d4130 0%,#07090b 47%);font:15px/1.65 system-ui,Arial;color:var(--text)}
+a{color:#a0f4cd}nav,main,footer{width:min(950px,calc(100% - 36px));margin:auto}nav{padding:22px 0;display:flex;justify-content:space-between;gap:12px;align-items:center}
+.brand{font-weight:800;font-size:18px;text-decoration:none;color:var(--text)}nav a{font-size:14px;text-decoration:none}
+h1{font-size:clamp(30px,5vw,53px);line-height:1.1;margin:15px 0}h2{margin:0 0 10px;font-size:21px}p{color:var(--muted)}.tag{display:inline-block;border:1px solid #316e50;padding:4px 12px;border-radius:99px;color:var(--accent);font-size:12px}
+.hero{padding:35px 0 22px;max-width:760px}.hero p{font-size:17px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:17px}.card{border:1px solid var(--stroke);background:var(--panel);border-radius:16px;padding:23px}.wide{grid-column:1/-1}
+.provider{display:flex;gap:10px;align-items:flex-start;border:1px solid #425052;border-radius:10px;padding:11px;margin-top:10px;cursor:pointer}
+.provider input{margin-top:5px;accent-color:var(--accent)}.provider span{display:block}.provider small{display:block;color:var(--muted)}
+ul{color:var(--muted);padding-left:20px}li{margin-bottom:7px}code{font:13px ui-monospace,monospace;color:#b8e3d0;overflow-wrap:anywhere}
+.secret-row{display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--stroke)}
+.secret-row:last-child{border:0}button,.btn{border:1px solid #417255;background:#173d2c;color:#dbffe9;border-radius:9px;padding:10px 15px;font-weight:650;cursor:pointer;text-decoration:none;display:inline-block;font:inherit}
+button:hover,.btn:hover{background:#24583c}.primary{background:var(--accent);color:#07170e;font-weight:800;border:0;padding:14px 20px}
+.primary:hover{background:#92ffc2}.muted{font-size:13px;color:var(--muted)}.notice{background:#11261d;border-left:3px solid var(--accent);padding:13px 17px;border-radius:4px}
+ol{color:var(--muted);padding-left:22px}strong{color:var(--text)}
+footer{margin-top:45px;padding:22px 0;border-top:1px solid var(--stroke);font-size:13px;color:var(--muted)}
+@media(max-width:680px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}.card{padding:17px}}
+</style>
+</head>
+<body>
+<nav><a class="brand" href="/">◈ VibeAgent</a><a href="https://github.com/Foxxed909/VibeAgent" rel="noopener noreferrer">View source ↗</a></nav>
+<main>
+<header class="hero">
+ <span class="tag">SELF-HOST · YOUR ACCOUNT · YOUR KEYS</span>
+ <h1>Deploy a VibeAgent<br>you actually own.</h1>
+ <p>Select a model provider, prepare independent credentials, then complete deployment directly on Vercel. This page never asks you to paste API keys and never sends credentials to its server.</p>
+</header>
+<div class="grid">
+<section class="card">
+ <h2>01 / Choose your AI provider</h2>
+ <label class="provider"><input type="radio" name="provider" value="openrouter" checked><span><strong>OpenRouter · Nemotron 3 Ultra</strong><small>Free model slug (subject to quotas); use OPENROUTER_API_KEY</small></span></label>
+ <label class="provider"><input type="radio" name="provider" value="nvidia"><span><strong>NVIDIA Build / NIM</strong><small>Direct Nemotron endpoint; use NVIDIA_API_KEY</small></span></label>
+ <label class="provider"><input type="radio" name="provider" value="openai"><span><strong>OpenAI API</strong><small>Use OPENAI_API_KEY and a model enabled on your API account</small></span></label>
+ <p class="muted">You can add another provider later in your own project's environment settings. OpenRouter free is not suitable for confidential scan evidence.</p>
+</section>
+<section class="card">
+ <h2>02 / Prepare storage</h2>
+ <p>Hosted scans need durable Redis/Upstash storage before they can run. Provision your <strong>own</strong> database and obtain:</p>
+ <ul><li><code>KV_REST_API_URL</code></li><li><code>KV_REST_API_TOKEN</code></li></ul>
+ <p>Find a Redis provider in <a href="https://vercel.com/marketplace/category/storage" rel="noopener noreferrer">Vercel Storage Marketplace</a>. Upstash REST variable names can be mapped to these keys.</p>
+ <p class="muted">Durable background mode additionally needs a separately hosted worker, and stays disabled until it is configured.</p>
+</section>
+<section class="card wide">
+ <h2>03 / Create private access credentials</h2>
+ <p>Use long independent values for your deployment's scan-access token, workspace-admin token and verification signing secret. Generate and copy these locally, then paste directly into Vercel's environment-variable prompts. <strong>Nothing generated here is uploaded or stored.</strong></p>
+ <div class="secret-row"><code>VIBE_AGENT_API_TOKEN</code><button type="button" data-copy="VIBE_AGENT_API_TOKEN">Generate + copy</button></div>
+ <div class="secret-row"><code>VIBE_AGENT_WORKSPACE_TOKEN</code><button type="button" data-copy="VIBE_AGENT_WORKSPACE_TOKEN">Generate + copy</button></div>
+ <div class="secret-row"><code>VIBE_AGENT_VERIFICATION_SECRET</code><button type="button" data-copy="VIBE_AGENT_VERIFICATION_SECRET">Generate + copy</button></div>
+ <p class="muted" id="copy-status" role="status" aria-live="polite">Tokens are generated only when you click; keep them somewhere private. If lost, rotate them in Vercel.</p>
+</section>
+<section class="card wide">
+ <h2>04 / Deploy on your Vercel account</h2>
+ <ol>
+  <li>Choose a Vercel team/project <strong>you control</strong>. Vercel will clone the public repository into your Git account.</li>
+  <li>Enter the API key for your selected AI provider and the two Upstash credentials, plus the three secrets you generated.</li>
+  <li>Deploy, then use the protected <code>/api/setup</code> endpoint to check readiness (authenticate using your workspace token). You must redeploy after adding or changing variables.</li>
+  <li>For scans, verify your exact target hostname and supply your own scan authorization token. Do not scan sites you do not own or have permission to assess.</li>
+ </ol>
+ <p class="notice"><strong>Privacy boundary:</strong> This self-deployment does not grant access to the original creator's Vercel team, deployments, environment variables or database. Nor can a copy read your other Vercel projects automatically. Vercel API access would require a separate, explicit, narrowly scoped authorization; this template does not request it.</p>
+ <a class="btn primary" id="deploy-button" href="https://vercel.com/clone" target="_blank" rel="noopener noreferrer">Continue securely on Vercel ↗</a>
+ <p class="muted">The outgoing link contains public repository details and environment-variable <em>names</em> only—never their values.</p>
+</section>
+</div>
+</main>
+<footer>VibeAgent · Deploy it independently. No shared creator credentials. No hidden OAuth permissions.</footer>
+<script>
+(function(){
+  "use strict";
+  const PROVIDERS = Object.freeze({
+    openrouter: {key:"OPENROUTER_API_KEY",model:"nvidia/nemotron-3-ultra-550b-a55b:free"},
+    nvidia: {key:"NVIDIA_API_KEY",model:"nvidia/nemotron-3-ultra-550b-a55b"},
+    openai: {key:"OPENAI_API_KEY",model:"gpt-6-luna"}
+  });
+  const BASE_KEYS = ["KV_REST_API_URL","KV_REST_API_TOKEN","VIBE_AGENT_API_TOKEN","VIBE_AGENT_WORKSPACE_TOKEN","VIBE_AGENT_VERIFICATION_SECRET"];
+  function updateLink(){
+    const name = document.querySelector('input[name="provider"]:checked').value;
+    const config = PROVIDERS[name];
+    const url = new URL("https://vercel.com/clone");
+    url.searchParams.set("repository-url","https://github.com/Foxxed909/VibeAgent");
+    url.searchParams.set("project-name","vibeagent-self-hosted");
+    url.searchParams.set("env",[config.key,...BASE_KEYS].join(","));
+    url.searchParams.set("envDescription","Use your own API key, Redis REST credentials, and three separate random access/signing tokens. Do not reuse the creator's credentials.");
+    url.searchParams.set("envLink","https://github.com/Foxxed909/VibeAgent/blob/main/README.md#self-hosted-deployment");
+    // envDefaults can contain only non-sensitive configuration.
+    document.getElementById("deploy-button").href=url.toString();
+  }
+  document.querySelectorAll('input[name="provider"]').forEach(input=>input.addEventListener("change",updateLink));
+  updateLink();
+  const status=document.getElementById("copy-status");
+  document.querySelectorAll("[data-copy]").forEach(button=>button.addEventListener("click",async()=>{
+    const bytes=new Uint8Array(32);
+    window.crypto.getRandomValues(bytes);
+    const value=Array.from(bytes,x=>x.toString(16).padStart(2,"0")).join("");
+    try {
+      await navigator.clipboard.writeText(value);
+      status.textContent=button.dataset.copy+" copied. Paste it into your new Vercel project. Generated values are not stored on this page.";
+    } catch {
+      status.textContent="Clipboard access blocked. Use a trusted password manager to generate a 32-byte random secret instead.";
+    }
+  }));
+})();
+</script>
+</body>
+</html>
