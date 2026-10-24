@@ -99,6 +99,10 @@ def _same_origin(base: str, candidate: str) -> bool:
 def tool_vibe_headers(url: str) -> str:
     status, body, headers = _fetch(url)
     lines = [f"URL: {url}", f"HTTP status: {status}"]
+    if status == 0:
+        return "\n".join(lines + [f"INCONCLUSIVE: network request failed: {body[:200]}"])
+    if status >= 400:
+        return "\n".join(lines + [f"INCONCLUSIVE: HTTP {status}; cannot infer missing security headers"])
     lines.extend(_maybe_challenge_note(url, status, body, headers))
     interesting = [
         "server", "x-powered-by", "x-frame-options", "content-security-policy",
@@ -419,6 +423,69 @@ def tool_senoria(url: str) -> str:
     return "\n".join(lines)
 
 
+def tool_api_check(url: str) -> str:
+    """Single-endpoint HTTP diagnostics without interpreting a status as a vulnerability."""
+    status, body, headers = _fetch(url)
+    if not status:
+        return f"Endpoint: {url}\\nINCONCLUSIVE: request failed: {body[:200]}"
+    return "\\n".join([
+        f"Endpoint: {url}", f"HTTP status: {status}",
+        f"Content-Type: {headers.get('content-type', '(none)')}",
+        f"Cache-Control: {headers.get('cache-control', '(none)')}",
+        f"Sampled bytes: {len(body)}",
+    ])
+
+
+def tool_nextjs_rsc_audit(url: str) -> str:
+    """Read-only Next.js/RSC mapping; no middleware-bypass or exploit claims."""
+    base = url.rstrip("/")
+    lines = [f"Next.js / RSC passive audit: {base}"]
+    status, body, headers = _fetch(base)
+    if not status:
+        return "\\n".join(lines + ["INCONCLUSIVE: target unreachable"])
+    markers = ("__NEXT_DATA__", "/_next/", "next-route-announcer")
+    lines.append("Next.js markers observed" if any(m in body for m in markers) or "x-nextjs-cache" in headers else "No Next.js markers in the sampled response")
+    for path in ("/_next/data/", "/_next/static/"):
+        st, _, hdrs = _fetch(base + path)
+        if st in (200, 401, 403):
+            lines.append(f"ROUTE {path}: HTTP {st} type={hdrs.get('content-type', '(none)')}")
+    lines.append("No middleware-bypass, private RSC leakage or Server Action exploitation was attempted.")
+    return "\\n".join(lines)
+
+
+def tool_redirect(url: str) -> str:
+    """Probe common redirect parameters with an inert canary; redirects are never followed."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    parsed = urlsplit(url)
+    probe = "https://redirect-test.invalid/vibeagent-canary"
+    lines = [f"Redirect policy check: {url}"]
+    for name in ("next", "redirect", "return", "url"):
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        query[name] = probe
+        candidate = urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", urlencode(query), ""))
+        status, _, headers = _fetch(candidate)
+        location = headers.get("location", "")
+        if status in (301, 302, 303, 307, 308) and location.startswith(probe):
+            lines.append(f"POSSIBLE exposure: untrusted external redirect via {name}, HTTP {status}")
+    if len(lines) == 1:
+        lines.append("No externally controllable redirect observed for common query parameters")
+    return "\\n".join(lines)
+
+
+def tool_cache_audit(url: str) -> str:
+    """Observe private-route caching indicators without presuming data exposure."""
+    base = url.rstrip("/")
+    lines = [f"Candidate private-route cache checks: {base}"]
+    for path in ("/api/me", "/api/user", "/api/account", "/api/profile"):
+        status, _, headers = _fetch(base + path)
+        if status == 200:
+            lines.append(f"OBSERVED: {path} HTTP 200 Cache-Control={headers.get('cache-control', '(none)')}")
+    if len(lines) == 1:
+        lines.append("No HTTP 200 on the sampled candidate routes")
+    lines.append("Do not claim a vulnerability without proving user-specific sensitive data is cacheable.")
+    return "\\n".join(lines)
+
+
 BUILTIN = {
     "vibe_headers": tool_vibe_headers,
     "ash": tool_ash,
@@ -432,6 +499,10 @@ BUILTIN = {
     "ghost": tool_ghost,
     "api_finder": tool_api_finder,
     "senoria": tool_senoria,
+    "api_check": tool_api_check,
+    "nextjs_rsc_audit": tool_nextjs_rsc_audit,
+    "redirect": tool_redirect,
+    "cache_audit": tool_cache_audit,
 }
 
 
