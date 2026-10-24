@@ -150,6 +150,40 @@ def _exact_https_target(target: str) -> tuple[str, str]:
     return host, "https://" + host
 
 
+def approve_operator_target(target: str) -> Dict[str, Any]:
+    """Issue an ordinary exact-host proof for a deployment-admin approved host.
+
+    This never checks target pages and never grants a wildcard or CIDR range.
+    The HTTP caller must separately prove possession of the operator token.
+    The host approval list is configured only by the deployment operator.
+    """
+    host, _ = _exact_https_target(target)
+    raw = (target or "").strip()
+    try:
+        parsed = urllib.parse.urlsplit(raw if "://" in raw else "https://" + raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise VerificationError("invalid target port") from exc
+    if port not in (None, 443):
+        raise VerificationError("operator approval supports only the standard HTTPS port")
+    approved = {
+        item.strip().lower().rstrip(".")
+        for item in os.environ.get("VIBE_AGENT_OWNER_APPROVED_HOSTS", "").split(",")
+        if item.strip() and "*" not in item and "/" not in item and ":" not in item
+    }
+    if not approved or host not in approved:
+        raise VerificationError("hostname is not approved by this deployment's operator")
+    if len(_verification_secret()) < 32:
+        raise VerificationError("a strong VIBE_AGENT_VERIFICATION_SECRET is required")
+    return {
+        "host": host,
+        "verified": True,
+        "expires_in": VERIFIED_TTL,
+        "proof": _signed_token("proof", host, VERIFIED_TTL),
+        "mode": "operator-approved",
+    }
+
+
 def create_challenge(target: str) -> Dict[str, Any]:
     host, origin = _exact_https_target(target)
     if _verification_secret():
