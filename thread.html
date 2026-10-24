@@ -312,6 +312,9 @@
       statusEl.className = 'badge running';
       row('system', '', 'Connecting live stream…');
 
+      // Never include an operator token in the request JSON, scan report or logs.
+      const scanApiToken = typeof payload.scan_api_token === 'string' ? payload.scan_api_token : '';
+      delete payload.scan_api_token;
       let requestBody = JSON.stringify(payload);
       if (payload.provider_keys) {
         for (const provider of Object.keys(payload.provider_keys)) payload.provider_keys[provider] = '';
@@ -321,7 +324,10 @@
       try {
         const res = await fetch('/api/stream', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(scanApiToken ? {'X-VibeAgent-Token': scanApiToken} : {})
+          },
           body: requestBody,
         });
         if (!res.ok || !res.body) {
