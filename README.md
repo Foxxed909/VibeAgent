@@ -7,7 +7,7 @@ Affordable autonomous **authorized** security testing with two agent modes:
 
 Both modes share the same model layer, scope enforcement, SSE live thread, job persistence and reports.
 
-The quality loop is bounded and evidence-led: deterministic baseline, model-guided investigation, exact-duplicate suppression, reproduction of material findings, independent review, then final synthesis. Tool, round, retry and retest budgets are fixed by the selected depth profile.
+The quality loop is bounded and evidence-led: deterministic baseline, model-guided investigation, exact-duplicate suppression, reproducibility review of material findings, optional independent review, then final synthesis. Tool, round, retry and retest budgets are fixed by the selected depth profile. Repeating heuristic evidence alone cannot confirm exploitability. Interrupted model investigations return partial or failed statuses rather than unconditional completion.
 
 ## Product tiers
 
@@ -20,7 +20,9 @@ Powered by [VibeHacking](https://github.com/Foxxed909/VibeHacking) tools. Agents
 
 ### VibeAgent
 
-Portable/serverless tools include cloud scouting, perimeter recon, same-origin spidering, OpenAPI discovery, security-header checks, CORS, session/cookie checks, authorization-boundary checks, environment/config exposure checks, sensitive-asset discovery, API discovery and redacted secret-marker scanning.
+Portable/serverless tools now include 16 bounded checks: cloud scouting, perimeter recon, same-origin spidering, OpenAPI discovery, security headers, CORS, session/cookie policy, authorization boundaries, configuration exposure, sensitive assets, API discovery, redacted secret markers, single-endpoint diagnostics, passive Next.js/RSC mapping, canary-based redirect checks and candidate private-route cache observations.
+
+The passive Next.js/RSC and cache checks are deliberately observational. They do not claim middleware bypass, RSC data leakage, or exploitability without specific evidence. The native VibeHacking checkout remains the source of deeper platform-specific tools.
 
 When `VIBEHACKING_ROOT` points to a native VibeHacking checkout, additional native capabilities may be exposed.
 
@@ -103,7 +105,9 @@ VIBE_AGENT_ALLOWED_MODELS=gpt-6-luna,openai/gpt-6-luna,google/gemini-3-flash
 
 Exact `provider/model` IDs route through Vercel AI Gateway. Vercel deployments use the injected `VERCEL_OIDC_TOKEN`; local or non-Vercel runtimes can set `AI_GATEWAY_API_KEY`. Provider keys are never passed to browser code or scan tools.
 
-Use an OpenAI model as the main VibeAgent planner and a Google model as an independent evidence reviewer:
+Use GPT-6 Luna or GPT-5.6 Luna as the main VibeAgent planner and optionally configure an independent evidence reviewer. The agent instructions require hypothesis-driven, attacker-style threat reasoning and explicit disconfirmation of weak findings. Tool-calling compatibility retains the provider-required effort setting, while text-only synthesis/review requests a higher reasoning effort where supported; adjust with `VIBE_AGENT_ANALYSIS_EFFORT=none|low|medium|high` (default `high`).
+
+To configure Google as the independent evidence reviewer:
 
 ```bash
 VIBEAGENT_MODEL=gpt-6-luna
@@ -243,7 +247,7 @@ Enter that token on `/app`; it is retained only in the current browser tab.
 4. Configure `VIBE_AGENT_INVITE_CODE_SHA256` and/or `VIBE_AGENT_API_TOKEN` for live-scan access.
 5. Configure `VIBE_AGENT_WORKSPACE_TOKEN` for `/app` history access.
 6. Set `VIBE_AGENT_VERIFICATION_SECRET` for stateless target verification.
-7. For durable jobs and waitlist entries, configure Vercel KV / Upstash REST variables.
+7. Configure Vercel KV / Upstash REST variables **before** enabling hosted scans: live hosted scans now fail closed if durable storage is absent, or report persistence fails. This does not affect local filesystem-based CLI runs. Waitlist storage also requires KV.
 8. Configure `VIBE_AGENT_REVIEW_MODEL=google/gemini-3-flash` and include it in `VIBE_AGENT_ALLOWED_MODELS` for dual-model review.
 9. Optionally configure the protected native worker variables above.
 10. Deploy.
@@ -254,7 +258,7 @@ Enter that token on `/app`; it is retained only in the current browser tab.
 - [x] Authorization form
 - [x] Dynamic multi-round VibeAgent orchestrator
 - [x] BreakAgent validation mode
-- [x] Expanded portable VibeAgent tool surface
+- [x] Expanded 16-tool portable VibeAgent surface, including passive Next.js/RSC, redirect, API endpoint, and cache observations
 - [x] Agent-specific tool policies
 - [x] OpenAI + Google through Vercel AI Gateway, plus direct OpenAI/OpenRouter paths
 - [x] Bounded evidence/retest loop with independent reviewer model
@@ -273,6 +277,9 @@ Enter that token on `/app`; it is retained only in the current browser tab.
 - [x] Stateless, signed, exact-host verification receipts for serverless deployments
 - [x] SSRF-resistant outbound address policy + redirect refusal
 - [x] Scan, workspace and model-selection access boundaries
+- [x] User-selectable GPT-6 Luna / GPT-5.6 Luna in the hosted scan form
+- [x] Explicit partial/failed scan statuses, strict hosted persistence, and interrupted-stream indication
+- [x] Multi-target hostname verification controls
 - [ ] Billing
 
 Exact host declarations never authorize sibling or child subdomains; list every authorized hostname explicitly.
