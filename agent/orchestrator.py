@@ -666,8 +666,12 @@ def _retest_findings(
         output = str(result.get("stdout") or result.get("message") or "")
         evidence = str(finding.get("evidence") or "").strip()
         if evidence and evidence in output:
-            finding["validation_status"] = "reproduced"
             finding["retested"] = True
+            # Repeatability is not evidence of exploitability for heuristic checks.
+            deterministic = finding.get("tool") == "vibe_headers" and evidence.startswith("MISSING:")
+            if not deterministic:
+                continue
+            finding["validation_status"] = "reproduced"
             emit(
                 "finding_validated",
                 id=finding.get("id"),
