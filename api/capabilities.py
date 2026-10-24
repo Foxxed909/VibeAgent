@@ -53,8 +53,17 @@ class handler(BaseHTTPRequestHandler):
             "tool_count": len(tool_caps.get("remote_tools") or []),
             "message": tool_caps.get("message") if verified else "Verify ownership to check worker availability.",
         }
+        queue_configured = False
+        queue_online = False
+        try:
+            require_queue()
+            queue_configured = True
+            queue_online = worker_online()
+        except Exception:
+            pass
         body = {
             "ok": True,
+            "queue": {"configured": queue_configured, "worker_online": queue_online},
             "portable": True,
             "ownership_verified": verified,
             "worker_tools": worker_tools,
