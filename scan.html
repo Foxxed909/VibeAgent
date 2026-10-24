@@ -384,11 +384,15 @@
         verifyMessage.textContent = "Select a listed target first.";
         return;
       }
+      const scanApiToken = document.getElementById("scan_api_token").value.trim();
       verifyMessage.textContent = action === "challenge" ? "Creating challenge…" : "Checking verification file…";
       try {
         const res = await fetch("/api/verify_target", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(scanApiToken ? {"X-VibeAgent-Token": scanApiToken} : {}),
+          },
           body: JSON.stringify({
             target: selectedTarget,
             action,
@@ -397,7 +401,9 @@
         });
         const data = await res.json();
         if (!data.ok) {
-          verifyMessage.textContent = data.error || "Verification failed.";
+          verifyMessage.textContent = (res.status === 401 && !scanApiToken && !document.getElementById("access_code").value.trim())
+            ? "Add your self-hosted scan API token or private invite code above, then retry verification."
+            : (data.error || "Verification failed.");
           return;
         }
         if (action === "challenge") {
