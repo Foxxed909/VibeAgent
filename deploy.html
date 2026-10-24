@@ -31,7 +31,7 @@ footer{margin-top:45px;padding:22px 0;border-top:1px solid var(--stroke);font-si
 <header class="hero">
  <span class="tag">SELF-HOST · YOUR ACCOUNT · YOUR KEYS</span>
  <h1>Deploy a VibeAgent<br>you actually own.</h1>
- <p>Select a model provider, prepare independent credentials, then complete deployment directly on Vercel. This page never asks you to paste API keys and never sends credentials to its server.</p>
+ <p>Select a model provider, prepare independent credentials, then complete deployment directly on Vercel. This page never asks you to paste API keys and never sends credentials to its server. Provider model and allowlist defaults are public configuration, not secrets.</p>
 </header>
 <div class="grid">
 <section class="card">
@@ -65,7 +65,7 @@ footer{margin-top:45px;padding:22px 0;border-top:1px solid var(--stroke);font-si
   <li>For scans, verify your exact target hostname and supply your own scan authorization token. Do not scan sites you do not own or have permission to assess.</li>
  </ol>
  <p class="notice"><strong>Privacy boundary:</strong> This self-deployment does not grant access to the original creator's Vercel team, deployments, environment variables or database. Nor can a copy read your other Vercel projects automatically. Vercel API access would require a separate, explicit, narrowly scoped authorization; this template does not request it.</p>
- <a class="btn primary" id="deploy-button" href="https://vercel.com/clone" target="_blank" rel="noopener noreferrer">Continue securely on Vercel ↗</a>
+ <a class="btn primary" id="deploy-button" href="https://vercel.com/new/clone" target="_blank" rel="noopener noreferrer">Continue securely on Vercel ↗</a>
  <p class="muted">The outgoing link contains public repository details and environment-variable <em>names</em> only—never their values.</p>
 </section>
 </div>
@@ -83,12 +83,18 @@ footer{margin-top:45px;padding:22px 0;border-top:1px solid var(--stroke);font-si
   function updateLink(){
     const name = document.querySelector('input[name="provider"]:checked').value;
     const config = PROVIDERS[name];
-    const url = new URL("https://vercel.com/clone");
+    const url = new URL("https://vercel.com/new/clone");
     url.searchParams.set("repository-url","https://github.com/Foxxed909/VibeAgent");
     url.searchParams.set("project-name","vibeagent-self-hosted");
-    url.searchParams.set("env",[config.key,...BASE_KEYS].join(","));
+    url.searchParams.set("env",[config.key,...BASE_KEYS,"VIBEAGENT_MODEL","VIBE_AGENT_ALLOWED_MODELS","VIBE_AGENT_QUEUE_ENABLED","VIBE_AGENT_REQUIRE_OWNERSHIP"].join(","));
+    url.searchParams.set("envDefaults",JSON.stringify({
+      VIBEAGENT_MODEL:config.model,
+      VIBE_AGENT_ALLOWED_MODELS:config.model,
+      VIBE_AGENT_QUEUE_ENABLED:"0",
+      VIBE_AGENT_REQUIRE_OWNERSHIP:"1"
+    }));
     url.searchParams.set("envDescription","Use your own API key, Redis REST credentials, and three separate random access/signing tokens. Do not reuse the creator's credentials.");
-    url.searchParams.set("envLink","https://github.com/Foxxed909/VibeAgent/blob/main/README.md#self-hosted-deployment");
+    url.searchParams.set("envLink","https://github.com/Foxxed909/VibeAgent/blob/main/README.md#deploy-on-vercel");
     // envDefaults can contain only non-sensitive configuration.
     document.getElementById("deploy-button").href=url.toString();
   }
