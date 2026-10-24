@@ -50,6 +50,11 @@ class BrowserContractTests(unittest.TestCase):
         self.assertIn("next_cursor", content)
         self.assertIn("cancel_token: token", content)
 
+    def test_legacy_stream_failure_does_not_repeat_scan(self):
+        content = (ROOT / "thread.html").read_text(encoding="utf-8")
+        self.assertNotIn("fetch('/api/scan',", content)
+        self.assertIn("No retry was submitted", content)
+
     def test_browser_inline_scripts_have_valid_javascript(self):
         if not shutil.which("node"):
             self.skipTest("Node.js unavailable")
