@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings · Keys — VibeAgent</title>
+<meta name="description" content="Configure your own AI provider API keys for your VibeAgent browser session.">
+<style>
+:root{color-scheme:dark;--bg:#070909;--surface:#111715;--line:#293731;--text:#f4fff8;--muted:#a9bab0;--green:#4ce68a}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 85% -10%,#173d2a 0%,#070909 48%);font:15px/1.6 system-ui,Arial;color:var(--text)}
+nav,main,footer{width:min(840px,calc(100% - 32px));margin:0 auto}nav{padding:22px 0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+a{color:#8ffac0;text-decoration:none}a:hover{text-decoration:underline}.brand{font-size:19px;font-weight:800;color:var(--text)}
+h1{font-size:clamp(30px,5vw,48px);line-height:1.15;margin:8px 0}h2{font-size:20px;margin:0 0 4px}p{color:var(--muted);margin:8px 0 18px}
+.kicker{font-size:12px;font-weight:700;color:var(--green);letter-spacing:.09em;text-transform:uppercase}
+.card{padding:22px;margin:18px 0;background:var(--surface);border:1px solid var(--line);border-radius:16px}
+.row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.field{min-width:0}
+label{display:block;font-size:14px;font-weight:700;margin-bottom:6px}
+input{width:100%;border:1px solid #3d5144;border-radius:9px;background:#080d0a;color:var(--text);padding:12px 13px;font:inherit}
+input:focus{outline:2px solid var(--green);outline-offset:1px}
+small,.note{font-size:12px;color:var(--muted)}.note{margin-top:5px}
+button,.button{background:#173d2b;color:var(--text);border:1px solid #387450;padding:11px 15px;border-radius:10px;font-weight:750;cursor:pointer}
+button:focus-visible,.button:focus-visible{outline:2px solid var(--green)}
+.primary{background:var(--green);color:#082211;border:0}
+.buttons{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}
+.notice{background:#13271c;padding:13px 16px;border-left:3px solid var(--green);border-radius:8px}
+.danger{border-color:#824044;color:#fecaca;background:#341b1f}
+details{border-top:1px solid var(--line);padding:12px 0}summary{cursor:pointer;font-weight:650}
+code{color:#befbd5;overflow-wrap:anywhere}footer{padding:25px 0;font-size:12px;color:var(--muted)}
+@media(max-width:610px){.grid{grid-template-columns:1fr}.card{padding:16px}}
+</style>
+</head>
+<body>
+<nav>
+  <a href="/" class="brand">◈ VibeAgent</a>
+  <div class="row"><a href="/scan">Scan</a><a href="/app">Workspace</a><a href="/deploy">Self-host</a></div>
+</nav>
+<main>
+  <div class="kicker">Account settings / Keys</div>
+  <h1>Your keys. Your provider account.</h1>
+  <p>Each operator enters their own OpenRouter, OpenAI, or NVIDIA API keys. A customer's provider credentials do <strong>not</strong> give them the product owner's Vercel account access.</p>
+  <section class="card">
+    <div class="row"><h2>Model provider credentials</h2><span class="kicker">BYOK · This tab</span></div>
+    <p>Save your keys for this browser tab only. They are kept in tab session storage, not sent to VibeAgent when you save. They're sent to your VibeAgent server over HTTPS only when starting a real scan, then forwarded to the provider you select.</p>
+    <form id="keys-form" autocomplete="off">
+      <div class="grid">
+        <div class="field"><label for="openrouter">OpenRouter API key</label><input id="openrouter" type="password" autocomplete="new-password" spellcheck="false" placeholder="sk-or-v1-…" maxlength="512"><div class="note">For Nemotron through OpenRouter</div></div>
+        <div class="field"><label for="nvidia">NVIDIA Build/NIM API key</label><input id="nvidia" type="password" autocomplete="new-password" spellcheck="false" placeholder="nvapi-…" maxlength="512"><div class="note">For Nemotron directly through NVIDIA</div></div>
+        <div class="field"><label for="openai">OpenAI API key</label><input id="openai" type="password" autocomplete="new-password" spellcheck="false" placeholder="sk-…" maxlength="512"><div class="note">Uses your own OpenAI API billing</div></div>
+        <div class="field"><label for="google">Google Gemini API key (optional)</label><input id="google" type="password" autocomplete="new-password" spellcheck="false" placeholder="AIza…" maxlength="512"><div class="note">Optional review-provider credential</div></div>
+      </div>
+      <div class="buttons">
+        <button class="primary" type="submit">Save keys for this tab</button>
+        <button class="danger" type="button" id="clear-keys">Clear all saved keys</button>
+        <a class="button" href="/scan">Go to real scan ↗</a>
+      </div>
+      <p id="keys-status" role="status" aria-live="polite">No keys uploaded. Saving only changes storage in this tab.</p>
+    </form>
+  </section>
+  <section class="card">
+    <h2>Company access and permissions</h2>
+    <p><strong>Provider keys are not admin permissions.</strong> You still need your own company authorization and an approved target. An invite to use the service is separate from permission to test a particular organization.</p>
+    <details>
+      <summary>Self-hosted deployment administrators only</summary>
+      <p>A self-hosted deployment administrator configures its own <code>VIBE_AGENT_API_TOKEN</code>, <code>VIBE_AGENT_VERIFICATION_SECRET</code> and optional exact host approvals in its own private Vercel project. Customers must never receive the deployment owner's admin token. Do not enter the product owner's admin token in this Keys page.</p>
+    </details>
+    <div class="notice"><strong>Privacy:</strong> This is a tab-only convenience, not an encrypted multi-user key vault. Anyone who can run scripts in this browser tab could read its session storage. Don't use it on shared devices. Close the tab or clear your keys when finished. Permanent per-company vaults require separate authenticated accounts, tenant isolation, encryption and revocation.</div>
+  </section>
+</main>
+<footer>No keys are sent to GitHub, Vercel clone links, or this settings page's server by pressing Save.</footer>
+<script>
+(() => {
+  "use strict";
+  const STORE = "vibeagent_user_provider_keys_v1";
+  const IDS = ["openrouter", "nvidia", "openai", "google"];
+  const status = document.getElementById("keys-status");
+  function clearFields() { for (const id of IDS) document.getElementById(id).value = ""; }
+  function readSaved() {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(STORE) || "{}");
+      if (!saved || Array.isArray(saved) || typeof saved !== "object") return {};
+      return saved;
+    } catch { return {}; }
+  }
+  const saved = readSaved();
+  for (const id of IDS) if (typeof saved[id] === "string") document.getElementById(id).value = saved[id];
+  const existing = IDS.filter(id => typeof saved[id] === "string" && saved[id]).length;
+  if (existing) status.textContent = existing + " provider key(s) available in this browser tab. No server-side account was accessed.";
+  document.getElementById("keys-form").addEventListener("submit", event => {
+    event.preventDefault();
+    const data = {};
+    for (const id of IDS) {
+      const value = document.getElementById(id).value.trim();
+      if (value) data[id] = value;
+    }
+    try {
+      if (Object.keys(data).length) sessionStorage.setItem(STORE, JSON.stringify(data));
+      else sessionStorage.removeItem(STORE);
+      status.textContent = "Saved " + Object.keys(data).length + " key(s) for this tab. Nothing was uploaded; open Scan to use them.";
+    } catch { status.textContent = "Could not save in this browser session. Check private browsing restrictions."; }
+  });
+  document.getElementById("clear-keys").addEventListener("click", () => {
+    sessionStorage.removeItem(STORE);
+    clearFields();
+    status.textContent = "Saved provider keys cleared from this tab.";
+  });
+})();
+</script>
+</body></html>
