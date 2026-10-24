@@ -70,15 +70,16 @@ def execute(job_id: str, worker_id: str) -> None:
             raise RuntimeError("worker lost queue lease during assessment")
         report["started_at"] = old["started_at"]
         report["finished_at"] = time.time()
-        job_store.save_job(report)
+        if not queue_store.save_report_if_owned(job_id, worker_id, report):
+            raise RuntimeError("Worker lease expired before final report could be committed")
         queue_store.append_event(job_id, {
             "type": "final", "ok": True, "job_id": job_id, "status": report["status"]
         })
     except JobCancelled:
         old["status"] = "cancelled"
         old["finished_at"] = time.time()
-        job_store.save_job(old)
-        queue_store.append_event(job_id, {"type": "done", "status": "cancelled"})
+        if queue_store.save_report_if_owned(job_id, worker_id, old):
+            queue_store.append_event(job_id, {"type": "done", "status": "cancelled"})
     finally:
         stop.set()
         heart.join(timeout=1)
@@ -99,11 +100,11 @@ def run_once(worker_id: str) -> bool:
             report["status"] = "failed"
             report.setdefault("errors", []).append(f"Worker processing failed: {type(exc).__name__}")
             report["finished_at"] = time.time()
-            job_store.save_job(report)
-        queue_store.append_event(job_id, {
-            "type": "done", "status": "failed",
-            "text": "Worker could not finish; check worker logs"
-        })
+            if queue_store.save_report_if_owned(job_id, worker_id, report):
+                queue_store.append_event(job_id, {
+                    "type": "done", "status": "failed",
+                    "text": "Worker could not finish; check worker logs"
+                })
     finally:
         queue_store.complete_claim(job_id, worker_id)
     return True
