@@ -5,6 +5,60 @@ Do not publish company hostnames, internal screenshots, API keys or report
 contents to the public repository. Only assess exact systems covered by your
 organization's authorization and testing window.
 
+## Recommended: real assessment from the browser
+
+The web UI can run real bounded checks against a **publicly reachable**
+HTTPS hostname owned or explicitly approved by the company, without a
+verification-file challenge. Nothing is simulated.
+
+Configure the following **only in a Vercel project you control** under
+Settings > Environment Variables, then redeploy:
+
+```text
+VIBE_AGENT_BROWSER_ONLY_ENABLED=1
+VIBE_AGENT_OWNER_APPROVED_HOSTS=the-exact-approved-host.example
+VIBE_AGENT_REQUIRE_OWNERSHIP=1
+```
+
+Also configure a unique `VIBE_AGENT_API_TOKEN` (at least 32 random
+characters), `VIBE_AGENT_VERIFICATION_SECRET` (at least 32 characters),
+and the appropriate model provider key (`NVIDIA_API_KEY` or
+`OPENROUTER_API_KEY`). **Redis is not required for this specific browser-only
+mode**. Do not configure company hostnames on someone else's Vercel
+deployment.
+
+In the web app:
+
+1. Open `/scan`; the **real scan** section is expanded by default.
+2. Enter exactly one approved HTTPS hostname and your private operator
+   scan API token.
+3. Click **Approve preconfigured company host (operator only)**.
+   The signed authorization lasts at most an hour. No challenge file is used.
+4. Leave **Real browser-only scan · private report** enabled. This runs
+   `Quick` depth with portable, read-only checks; no stress or session
+   cookies are permitted.
+5. Supply a model provider key in the browser, choose Nemotron/OpenRouter,
+   type the authorization confirmation and launch.
+6. Watch the **actual HTTP/model events** in the live thread. Download the
+   real JSON report before closing the tab. It is not stored in server job
+   history or the browser's session storage.
+
+There is still a hard infrastructure boundary: **Vercel cannot reach a
+company-only VPN or RFC1918/intranet IP just because you open its website.**
+For privately routed targets, use the same browser/queue UI with a
+continuously running worker deployed on an authorized machine inside the
+company network, attached to the same owner-controlled Redis store.
+Do not add VPN credentials or internal hosts to the public GitHub repo.
+The queue worker requires a separate worker provider key and matching
+signing secret and approved hostname configuration.
+
+This browser mode is disabled by default and remains unavailable until an
+operator explicitly sets the feature flag and the exact-host allowlist.
+A valid Vercel build does not validate live provider access, company network
+reachability or the completion of an assessment. Inspect the actual results,
+which may be partial, inconclusive or failed; do not label them successful
+penetration-test findings without supporting evidence.
+
 ## Option A: company-network CLI (recommended for private DNS/internal apps)
 
 Run the CLI on a machine inside the approved company network or VPN. The
