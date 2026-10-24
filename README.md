@@ -103,7 +103,7 @@ API callers cannot select arbitrary provider models. Configure the exact permitt
 VIBE_AGENT_ALLOWED_MODELS=gpt-6-luna,openai/gpt-6-luna,google/gemini-3-flash
 ```
 
-Exact `provider/model` IDs route through Vercel AI Gateway. Vercel deployments use the injected `VERCEL_OIDC_TOKEN`; local or non-Vercel runtimes can set `AI_GATEWAY_API_KEY`. Provider keys are never passed to browser code or scan tools.
+Most `provider/model` IDs route through Vercel AI Gateway; Nemotron is an explicit exception routed through OpenRouter or NVIDIA NIM. Vercel deployments use the injected `VERCEL_OIDC_TOKEN`; local or non-Vercel runtimes can set `AI_GATEWAY_API_KEY`. Provider keys are never passed to browser code or scan tools.
 
 Use GPT-6 Luna or GPT-5.6 Luna as the main VibeAgent planner and optionally configure an independent evidence reviewer. The agent instructions require hypothesis-driven, attacker-style threat reasoning and explicit disconfirmation of weak findings. Tool-calling compatibility retains the provider-required effort setting, while text-only synthesis/review requests a higher reasoning effort where supported; adjust with `VIBE_AGENT_ANALYSIS_EFFORT=none|low|medium|high` (default `high`).
 
@@ -129,21 +129,20 @@ not a claim that every security weakness is exploitable.
 
 **Option A — OpenRouter free endpoint**:
 
-- Model: \`nvidia/nemotron-3-ultra-550b-a55b:free\`
-- Key: \`OPENROUTER_API_KEY\` in a trusted environment, or fill the
+- Model: `nvidia/nemotron-3-ultra-550b-a55b:free`
+- Key: `OPENROUTER_API_KEY` in a trusted environment, or fill the
   OpenRouter API key field on the scan form.
-- HTTP API: \`https://openrouter.ai/api/v1/chat/completions\`.
+- HTTP API: `https://openrouter.ai/api/v1/chat/completions`.
 
 **Option B — NVIDIA Build/NIM**:
 
-- Model: \`nvidia/nemotron-3-ultra-550b-a55b\` (no \`:free\` suffix).
-- Key: \`NVIDIA_API_KEY\` in a trusted environment, or fill the
+- Model: `nvidia/nemotron-3-ultra-550b-a55b` (no `:free` suffix).
+- Key: `NVIDIA_API_KEY` in a trusted environment, or fill the
   NVIDIA API key field on the scan form.
-- HTTP API: \`https://integrate.api.nvidia.com/v1/chat/completions\`.
+- HTTP API: `https://integrate.api.nvidia.com/v1/chat/completions`.
 
-Selecting the \`:free\` model with **only a NVIDIA key** also routes to
-NVIDIA NIM with the unsuffixed model ID. If an OpenRouter key is present,
-the \`:free\` request goes to OpenRouter. Explicit unsuffixed NVIDIA
+Selecting the `:free` model with **only a NVIDIA key** also routes to
+NVIDIA NIM with the unsuffixed model ID. An explicitly supplied OpenRouter key routes to OpenRouter; an explicitly supplied NVIDIA key takes precedence over any ambient OpenRouter server key. Explicit unsuffixed NVIDIA
 selection always uses NVIDIA and does not silently spend OpenRouter paid
 credits. API keys are request-scoped and are never persisted in the scan
 report; queued scans accept **no BYOK secrets** and instead use the worker
@@ -152,21 +151,21 @@ capacity: it can be rate-limited or unavailable.
 
 To make Nemotron the CLI/server default **once a provider key is configured**:
 
-\`\`\`bash
+```bash
 export VIBEAGENT_MODEL='nvidia/nemotron-3-ultra-550b-a55b:free'
 export OPENROUTER_API_KEY='YOUR_OPENROUTER_KEY'
 # or: export NVIDIA_API_KEY='YOUR_NVIDIA_KEY'
 python -m agent.cli --model nvidia/nemotron-3-ultra-550b-a55b:free \
   --tier hobby --target https://your-owned-app.example \
   --app-name Demo --confirm 'I OWN OR AM AUTHORIZED TO TEST THESE TARGETS'
-\`\`\`
+```
 
-If \`VIBE_AGENT_ALLOWED_MODELS\` is explicitly configured, include the exact
+If `VIBE_AGENT_ALLOWED_MODELS` is explicitly configured, include the exact
 Nemotron ID(s) in that allowlist:
 
-\`\`\`text
+```text
 VIBE_AGENT_ALLOWED_MODELS=gpt-6-luna,google/gemini-3-flash,nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3-ultra-550b-a55b
-\`\`\`
+```
 
 For direct NVIDIA NIM, its model options enable the model's supported
 reasoning mode. OpenRouter requests enable reasoning for the free Nemotron
