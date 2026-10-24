@@ -129,6 +129,10 @@
           <button type="button" id="create-verify">Create challenge</button>
           <button type="button" id="confirm-verify">Confirm verification</button>
         </div>
+        <button type="button" id="approve-verify" style="margin-top:10px;width:100%;padding:11px;border-radius:8px;border:1px solid rgba(34,197,94,.5);background:#113222;color:#d1fae5;font-weight:700;cursor:pointer">
+          Approve preconfigured company host (operator only)
+        </button>
+        <p class="hint">For private/self-hosted deployments: requires your operator API token and an exact hostname configured by your deployment admin. No challenge file needed. This does not enable scanning unapproved hosts.</p>
       </div>
 
       <label for="depth">Depth</label>
@@ -398,7 +402,13 @@
         return;
       }
       const scanApiToken = document.getElementById("scan_api_token").value.trim();
-      verifyMessage.textContent = action === "challenge" ? "Creating challenge…" : "Checking verification file…";
+      if (action === "approve" && !scanApiToken) {
+        verifyMessage.textContent = "Enter your private self-hosted operator API token above. Invite codes cannot grant operator approval.";
+        return;
+      }
+      verifyMessage.textContent = action === "approve"
+        ? "Checking private operator approval…" : action === "challenge"
+        ? "Creating challenge…" : "Checking verification file…";
       try {
         const res = await fetch("/api/verify_target", {
           method: "POST",
@@ -430,7 +440,9 @@
           }
           confirmedTargets.add(selectedTarget);
           sessionStorage.setItem("vibeagent_verified_targets", JSON.stringify([...confirmedTargets]));
-          verifyMessage.textContent = "Ownership verified for " + selectedTarget + ".";
+          verifyMessage.textContent = action === "approve"
+            ? "Operator approval issued for this exact host (expires in one hour)."
+            : "Ownership verified for " + selectedTarget + ".";
           verifyChallenge.style.display = "none";
           await refreshWorkerAvailability();
         }
@@ -441,6 +453,7 @@
 
     document.getElementById("create-verify").onclick = () => verificationRequest("challenge");
     document.getElementById("confirm-verify").onclick = () => verificationRequest("confirm");
+    document.getElementById("approve-verify").onclick = () => verificationRequest("approve");
 
     document.getElementById("scan-form").onsubmit = async (e) => {
       e.preventDefault();
