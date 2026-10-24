@@ -159,12 +159,20 @@
       <select id="model" name="model">
         <option value="gpt-6-luna" selected>GPT-6 Luna</option>
         <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+        <option value="nvidia/nemotron-3-ultra-550b-a55b:free">NVIDIA Nemotron 3 Ultra 550B · OpenRouter free (or NVIDIA key)</option>
+        <option value="nvidia/nemotron-3-ultra-550b-a55b">NVIDIA Nemotron 3 Ultra 550B · NVIDIA NIM direct</option>
       </select>
       <p class="hint">Both agents use evidence-first attacker-style investigation. Text-only final synthesis requests high reasoning effort where supported.</p>
 
       <label for="openai_api_key">OpenAI API key</label>
       <input id="openai_api_key" name="openai_api_key" type="password" required placeholder="sk-…" autocomplete="new-password" spellcheck="false" />
-      <p class="hint">Runs the VibeAgent planner with your API account. This is an API key, not a ChatGPT subscription login.</p>
+      <p class="hint">OpenAI models use an API key, not a ChatGPT subscription login.</p>
+      <label for="openrouter_api_key">OpenRouter API key (Nemotron free endpoint)</label>
+      <input id="openrouter_api_key" name="openrouter_api_key" type="password" placeholder="sk-or-v1-…" autocomplete="new-password" spellcheck="false" />
+      <p class="hint">Uses the exact nvidia/nemotron-3-ultra-550b-a55b:free endpoint. Subject to availability, rate limits and provider data policies.</p>
+      <label for="nvidia_api_key">NVIDIA Build / NIM API key</label>
+      <input id="nvidia_api_key" name="nvidia_api_key" type="password" placeholder="nvapi-…" autocomplete="new-password" spellcheck="false" />
+      <p class="hint">Uses NVIDIA's OpenAI-compatible endpoint, with the model ID without :free. A separate NVIDIA key is needed unless the worker is configured with one.</p>
 
       <label for="google_api_key">Google Gemini API key</label>
       <input id="google_api_key" name="google_api_key" type="password" placeholder="AIza…" autocomplete="new-password" spellcheck="false" />
@@ -192,14 +200,18 @@
     const queuedCheckbox = document.getElementById("queued_mode");
     let queueAvailabilityInitialized = false;
     function syncQueueMode() {
-      document.getElementById("openai_api_key").required = !queuedCheckbox.checked;
+      const model = document.getElementById("model").value;
+      document.getElementById("openai_api_key").required = !queuedCheckbox.checked && !model.startsWith("nvidia/nemotron-3-ultra-550b-a55b");
       document.getElementById("openai_api_key").disabled = queuedCheckbox.checked;
       document.getElementById("google_api_key").disabled = queuedCheckbox.checked;
+      document.getElementById("openrouter_api_key").disabled = queuedCheckbox.checked;
+      document.getElementById("nvidia_api_key").disabled = queuedCheckbox.checked;
       document.getElementById("cookie").disabled = queuedCheckbox.checked;
       document.getElementById("stress").disabled = queuedCheckbox.checked || agentMode === "break" || backendSelect.value !== "portable";
       document.getElementById("stress_org").disabled = queuedCheckbox.checked || agentMode === "break" || backendSelect.value !== "portable";
     }
     queuedCheckbox.addEventListener("change", syncQueueMode);
+    document.getElementById("model").addEventListener("change", syncQueueMode);
     const workerToolsOption = document.getElementById("worker-tools-option");
     const backendHint = document.getElementById("backend-hint");
     const verifyBox = document.getElementById("verify-box");
@@ -461,11 +473,24 @@
         provider_keys: {
           openai: document.getElementById("openai_api_key").value.trim(),
           google: document.getElementById("google_api_key").value.trim(),
+          openrouter: document.getElementById("openrouter_api_key").value.trim(),
+          nvidia: document.getElementById("nvidia_api_key").value.trim(),
         },
         ownership_proofs: Object.fromEntries(
           targets.filter(target => ownershipProofs[target]).map(target => [target, ownershipProofs[target]])
         ),
       };
+      if (!queuedCheckbox.checked && payload.model.startsWith("nvidia/nemotron-3-ultra-550b-a55b")) {
+        const nvidiaDirect = !payload.model.endsWith(":free");
+        if (nvidiaDirect && !payload.provider_keys.nvidia) {
+          err.textContent = "NVIDIA NIM direct mode requires an NVIDIA API key in this browser, or choose OpenRouter free mode.";
+          err.hidden = false; return;
+        }
+        if (!nvidiaDirect && !payload.provider_keys.openrouter && !payload.provider_keys.nvidia) {
+          err.textContent = "Provide an OpenRouter key or NVIDIA API key for Nemotron (legacy BYOK mode).";
+          err.hidden = false; return;
+        }
+      }
       if (payload.stress_multiplier && !(hasInvite || effectiveTier === "enterprise")) {
         err.textContent = "Stress requires Enterprise or a valid private invite."; err.hidden = false; return;
       }
@@ -507,6 +532,8 @@
       sessionStorage.setItem("vibeagent_pending_scan", JSON.stringify(payload));
       document.getElementById("openai_api_key").value = "";
       document.getElementById("google_api_key").value = "";
+      document.getElementById("openrouter_api_key").value = "";
+      document.getElementById("nvidia_api_key").value = "";
       location.href = "/thread?live=1";
     };
 
