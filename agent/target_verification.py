@@ -175,11 +175,12 @@ def approve_operator_target(target: str) -> Dict[str, Any]:
         raise VerificationError("hostname is not approved by this deployment's operator")
     if len(_verification_secret()) < 32:
         raise VerificationError("a strong VIBE_AGENT_VERIFICATION_SECRET is required")
+    approval_ttl = min(3600, VERIFIED_TTL)  # Re-approval required after one hour.
     return {
         "host": host,
         "verified": True,
-        "expires_in": VERIFIED_TTL,
-        "proof": _signed_token("proof", host, VERIFIED_TTL),
+        "expires_in": approval_ttl,
+        "proof": _signed_token("proof", host, approval_ttl),
         "mode": "operator-approved",
     }
 
