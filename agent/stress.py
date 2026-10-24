@@ -91,7 +91,9 @@ def run_stress(
 
     headers = {"User-Agent": UA, "Accept": "*/*"}
     if cookie:
-        headers["Cookie"] =    status_counts: Dict[int, int] = {}
+        headers["Cookie"] = cookie
+
+    status_counts: Dict[int, int] = {}
     ok = fail = challenge = completed = 0
     t0 = time.monotonic()
     deadline = t0 + duration_s
@@ -124,8 +126,6 @@ def run_stress(
         for fut in pending:
             fut.cancel()
         pool.shutdown(wait=False, cancel_futures=True)
-
-  break
 
     elapsed = max(time.monotonic() - t0, 0.001)
     note = (
