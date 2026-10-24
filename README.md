@@ -32,6 +32,25 @@ BreakAgent is intentionally validation-focused. Its default tool policy emphasiz
 
 It does **not** receive the native challenge-bypass tool. On a native VibeHacking runtime it may receive the benign `poc_gen` verifier. Stress/load mode is disabled for BreakAgent.
 
+## One-tap UI demo (no setup)
+
+Use the **Try free UI demo** button on the landing page or the **Try the
+selected agent · Demo** button on `/scan`. You can also open:
+
+- `/thread?demo=vibe` — simulated VibeAgent discovery
+- `/thread?demo=break` — simulated BreakAgent validation
+
+Demo mode runs **entirely in the browser** with synthetic output referencing
+the reserved `example.invalid` hostname. It tests the mobile thread design,
+progress messages, tool-call rendering, finding cards and a locally downloaded
+sample JSON report. **No websites are scanned, no models are called, no keys
+or sign-in are required, and no fake job is stored in real scan history.**
+
+The ownership challenge, invite/operator authorization and storage requirements
+are **not disabled for real live scans**. A production deployment that accepts
+real targets must still require exact-host ownership proof and scan access,
+and persist reports in durable storage.
+
 ## Live thread
 
 Start from `/scan`, choose VibeAgent or BreakAgent, and the app opens `/thread?live=1`. Tool calls, findings, model information and the final report stream into the same thread UI.
