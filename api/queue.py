@@ -14,7 +14,7 @@ from agent.models import OpenRouterError, validate_requested_model
 from agent.product import resolve_depth
 from agent.queue_store import cancel, enqueue, require_queue, worker_online
 from agent.scope import Authorization, ScopeError, normalize_target
-from agent.target_verification import is_target_verified
+from agent.target_verification import is_target_verified, is_operator_approved_proof
 from api._security import (
     apply_cors, parse_provider_keys, read_json_body,
     require_allowed_origin, require_scan_access,
@@ -97,6 +97,8 @@ class handler(BaseHTTPRequestHandler):
                     raise ScopeError("Target ownership verification is required before a live scan")
             model = validate_requested_model(data.get("model") or None)
             depth = resolve_depth(auth.tier, data.get("depth"), auth.access_code)
+            if any(is_operator_approved_proof(t, proofs.get(normalize_target(t))) for t in auth.targets) and depth != "quick":
+                raise ScopeError("operator-approved assessment requires Quick depth")
             mode = data.get("agent_mode") or "vibe"
             if mode not in {"vibe", "break"}:
                 raise ScopeError("agent_mode must be vibe or break")
