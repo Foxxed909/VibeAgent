@@ -497,7 +497,12 @@ def _run_job_impl(
     analysis_effort = (os.environ.get("VIBE_AGENT_ANALYSIS_EFFORT") or "high").strip().lower()
     if analysis_effort not in {"none", "low", "medium", "high"}:
         analysis_effort = "high"
-    review_model = (os.environ.get("VIBE_AGENT_REVIEW_MODEL") or "").strip()
+    # A separate review model could silently bill the deployment owner's key
+    # or transmit customer findings to a provider the customer did not select.
+    # Keep independent review disabled for shared BYOK-only scans until a
+    # tenant-scoped reviewer key, consent and routing are implemented.
+    strict_customer_mode = (os.environ.get("VIBE_AGENT_REQUIRE_CUSTOMER_KEYS") or "").strip().lower() in {"1", "true", "yes"}
+    review_model = "" if strict_customer_mode else (os.environ.get("VIBE_AGENT_REVIEW_MODEL") or "").strip()
     if review_model:
         report["loop"]["phase"] = "independent_review"
         emit("phase", name="independent_review", model=review_model)
