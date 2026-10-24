@@ -157,19 +157,19 @@
 
       <label for="model">Investigation model</label>
       <select id="model" name="model">
-        <option value="gpt-6-luna" selected>GPT-6 Luna</option>
+        <option value="gpt-6-luna">GPT-6 Luna</option>
         <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
-        <option value="nvidia/nemotron-3-ultra-550b-a55b:free">NVIDIA Nemotron 3 Ultra 550B · OpenRouter free (or NVIDIA key)</option>
+        <option value="nvidia/nemotron-3-ultra-550b-a55b:free" selected>NVIDIA Nemotron 3 Ultra 550B · OpenRouter free (or NVIDIA key)</option>
         <option value="nvidia/nemotron-3-ultra-550b-a55b">NVIDIA Nemotron 3 Ultra 550B · NVIDIA NIM direct</option>
       </select>
-      <p class="hint">Both agents use evidence-first attacker-style investigation. Text-only final synthesis requests high reasoning effort where supported.</p>
+      <p class="hint">Nemotron 3 Ultra is the default. Both agents use hypothesis-driven red-team reasoning and controlled evidence checks inside verified scope; report synthesis requests deeper reasoning where supported.</p>
 
       <label for="openai_api_key">OpenAI API key</label>
       <input id="openai_api_key" name="openai_api_key" type="password" required placeholder="sk-…" autocomplete="new-password" spellcheck="false" />
       <p class="hint">OpenAI models use an API key, not a ChatGPT subscription login.</p>
       <label for="openrouter_api_key">OpenRouter API key (Nemotron free endpoint)</label>
       <input id="openrouter_api_key" name="openrouter_api_key" type="password" placeholder="sk-or-v1-…" autocomplete="new-password" spellcheck="false" />
-      <p class="hint">Uses the exact nvidia/nemotron-3-ultra-550b-a55b:free endpoint. Subject to availability, rate limits and provider data policies.</p>
+      <p class="hint">Uses the exact nvidia/nemotron-3-ultra-550b-a55b:free endpoint. Free requests are rate-limited. Do not submit confidential or personal scan evidence: this provider may log inputs and outputs.</p>
       <label for="nvidia_api_key">NVIDIA Build / NIM API key</label>
       <input id="nvidia_api_key" name="nvidia_api_key" type="password" placeholder="nvapi-…" autocomplete="new-password" spellcheck="false" />
       <p class="hint">Uses NVIDIA's OpenAI-compatible endpoint, with the model ID without :free. A separate NVIDIA key is needed unless the worker is configured with one.</p>
