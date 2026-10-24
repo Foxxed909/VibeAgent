@@ -72,6 +72,7 @@
     <span class="badge model" id="finding-badge" hidden></span>
     <span class="header-spacer"></span>
     <button class="report-link" type="button" id="cancel-job" hidden>Cancel scan</button>
+    <button class="report-link" type="button" id="demo-json" hidden>Download sample JSON</button>
     <span class="report-links" id="report-links" hidden>
       <a class="report-link" id="json-report" href="#">JSON</a>
       <a class="report-link" id="sarif-report" href="#">SARIF</a>
@@ -85,6 +86,8 @@
     const jobId = params.get('job') || params.get('id') || '';
     const live = params.get('live') === '1';
     const queued = params.get('queued') === '1';
+    // A client-only UI simulation; no scan, model request, or storage operation.
+    const demoMode = ['vibe', 'break'].includes(params.get('demo')) ? params.get('demo') : '';
     const chat = document.getElementById('chat');
     const empty = document.getElementById('empty');
     const statusEl = document.getElementById('status');
@@ -227,6 +230,89 @@
       if (report.report_text) row('agent', currentAgent + ' · final report', report.report_text);
     }
 
+
+    async function startDemo() {
+      // Never call any API, read secrets, or persist a sample as a real scan.
+      // All content uses a reserved .invalid hostname and is explicitly fictional.
+      setAgent(demoMode === 'break' ? 'BreakAgent' : 'VibeAgent');
+      document.getElementById('job-label').textContent = 'SAMPLE · NOT A REAL SCAN';
+      statusEl.textContent = 'demo · running';
+      statusEl.className = 'badge running';
+      setModel('UI simulation (no AI called)', 'demo', 'none');
+      row('system', '', 'DEMO ONLY — Fictional results. No website, API key, ownership challenge, or external model is used.');
+      row('system', '', 'Explore the thread UI. Production scans still require target ownership verification and scan access.');
+      const target = 'https://example.invalid';
+      const finding = {
+        id: 'DEMO-FINDING-001',
+        title: demoMode === 'break' ? 'Sample session-cookie observation' : 'Sample missing security header',
+        severity: 'low',
+        validation_status: 'fictional-example',
+        tool: demoMode === 'break' ? 'phantom' : 'vibe_headers',
+        location: target,
+        evidence: 'FAKE SAMPLE EVIDENCE — no request was sent and no actual vulnerability was found.',
+        cwe: demoMode === 'break' ? 'CWE-614' : 'CWE-693',
+        recommendation: demoMode === 'break'
+          ? 'For a real finding, review HttpOnly, Secure, and SameSite on authenticated cookies.'
+          : 'For a real finding, review which defensive response headers apply to this endpoint.'
+      };
+      const toolName = finding.tool;
+      const steps = [
+        {type: 'round', index: 1, max: 3},
+        {type: 'agent_message', text: 'DEMO: Mapping application entry points and trust boundaries for a fictional service.'},
+        {type: 'tool_start', tool: 'cloud_scout', args: {url: target}},
+        {type: 'tool_result', tool: 'cloud_scout', backend: 'simulation', ok: true, preview: 'SAMPLE: edge and host metadata would appear here (no network activity).'},
+        {type: 'round', index: 2, max: 3},
+        {type: 'agent_message', text: demoMode === 'break'
+          ? 'DEMO: Comparing the expected secure session-cookie policy with fictional evidence.'
+          : 'DEMO: Prioritizing a safe response-header policy check.'},
+        {type: 'tool_start', tool: toolName, args: {url: target}},
+        {type: 'tool_result', tool: toolName, backend: 'simulation', ok: true, preview: finding.evidence},
+        {type: 'finding', ...finding},
+        {type: 'round', index: 3, max: 3},
+        {type: 'agent_message', text: 'DEMO: In a real scan, the agent would check negative controls and reproduce observations before reporting.'}
+      ];
+      for (const event of steps) {
+        await new Promise(resolve => setTimeout(resolve, 350));
+        handleEvent(event);
+      }
+      const report = {
+        demo: true,
+        status: 'demo_complete',
+        agent_mode: demoMode,
+        agent_name: currentAgent,
+        execution_backend: 'client-only simulation',
+        model: 'UI simulation (no AI called)',
+        provider: 'demo',
+        targets: [target],
+        summary: {total_findings: 1, severity: {low: 1}, errors: 0},
+        findings: [finding],
+        report_text: '# SAMPLE REPORT — NOT A SECURITY ASSESSMENT\n\n'
+          + 'This is an invented demonstration of VibeAgent UI components. '
+          + 'No live target was contacted and no model or scanning engine ran.\n\n'
+          + '## Findings\n\n- ' + finding.title
+          + ' (fictional low severity). Evidence: ' + finding.evidence
+          + '\n\nRemediation example: ' + finding.recommendation
+      };
+      // Do not set job_id, call setReportLinks, write job storage, or expose
+      // download links backed by the real report API.
+      finalReport = report;
+      setFindingSummary(report);
+      row('agent', currentAgent + ' · sample report', report.report_text);
+      statusEl.textContent = 'demo complete';
+      statusEl.className = 'badge';
+      const button = document.getElementById('demo-json');
+      button.hidden = false;
+      button.onclick = () => {
+        const blob = new Blob([JSON.stringify(report, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'vibeagent-demo-sample.json';
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+      row('system', '', 'Sample complete! Download a sample report or return to /scan for a real, verified scan.');
+    }
 
     async function startQueue() {
       const token = sessionStorage.getItem('vibeagent_cancel_' + jobId);
@@ -410,7 +496,8 @@
       } catch {}
     }
 
-    if (live) startLive();
+    if (demoMode) startDemo();
+    else if (live) startLive();
     else if (queued && jobId) startQueue();
     else loadExisting();
   </script>
