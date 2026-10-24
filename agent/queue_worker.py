@@ -86,6 +86,7 @@ def execute(job_id: str, worker_id: str) -> None:
 
 def run_once(worker_id: str) -> bool:
     queue_store.require_queue()
+    queue_store.touch_worker(worker_id)
     queue_store.recover_orphans()
     job_id = queue_store.claim(worker_id)
     if not job_id:
