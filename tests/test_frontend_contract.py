@@ -84,6 +84,27 @@ class BrowserContractTests(unittest.TestCase):
         self.assertIn('access_code: document.getElementById("access_code").value.trim()', verification)
         self.assertIn("Add your self-hosted scan API token or private invite", verification)
 
+    def test_demo_is_separate_and_never_calls_scanning_apis(self):
+        scan = (ROOT / "scan.html").read_text(encoding="utf-8")
+        thread = (ROOT / "thread.html").read_text(encoding="utf-8")
+        landing = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="launch-demo"', scan)
+        self.assertIn('"/thread?demo=" + encodeURIComponent(agentMode)', scan)
+        self.assertIn('href="/thread?demo=vibe"', landing)
+        self.assertIn("if (demoMode) startDemo();", thread)
+        self.assertLess(thread.index("if (demoMode) startDemo();"),
+                        thread.index("else if (live) startLive();"))
+        demo = thread.split("async function startDemo() {", 1)[1].split("async function startQueue() {", 1)[0]
+        self.assertIn("https://example.invalid", demo)
+        self.assertIn("No website, API key, ownership challenge", demo)
+        self.assertIn("demo: true", demo)
+        self.assertIn("client-only simulation", demo)
+        self.assertNotIn("fetch(", demo)
+        self.assertNotIn("sessionStorage.", demo)
+        self.assertNotIn("save_job(", demo)
+        self.assertNotIn("/api/stream", demo)
+        self.assertNotIn("setReportLinks(", demo)
+
     def test_browser_inline_scripts_have_valid_javascript(self):
         if not shutil.which("node"):
             self.skipTest("Node.js unavailable")
