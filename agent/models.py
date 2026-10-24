@@ -22,6 +22,9 @@ from .request_context import (
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 AI_GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions"
 GOOGLE_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+NVIDIA_OPENAI_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+NEMOTRON_NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+NEMOTRON_OPENROUTER_FREE_MODEL = NEMOTRON_NVIDIA_MODEL + ":free"
 MAX_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
 
 FREE_MODELS = [
@@ -29,6 +32,7 @@ FREE_MODELS = [
     "inclusionai/ling-3.0-flash-sante:free",
     "poolside/laguna-xs-2.1:free",
     "poolside/laguna-s-2.1:free",
+    NEMOTRON_OPENROUTER_FREE_MODEL,
 ]
 DEFAULT_OPENROUTER = FREE_MODELS[0]
 
@@ -47,7 +51,7 @@ def allowed_models() -> set[str]:
     if configured:
         return configured | plan_models
     defaults = set(FREE_MODELS)
-    defaults.update({"gpt-6-luna", "gpt-5.6-luna"})
+    defaults.update({"gpt-6-luna", "gpt-5.6-luna", NEMOTRON_NVIDIA_MODEL})
     defaults.update(plan_models)
     defaults.update({
         "openai/gpt-6-luna",
@@ -94,6 +98,25 @@ def chat(
 
     model = validate_requested_model(model)
     selected = model or (os.environ.get("VIBEAGENT_MODEL") or "").strip()
+    # Route Nemotron explicitly rather than treating its provider/model slug as
+    # a Vercel AI Gateway model. OpenRouter uses :free, NVIDIA NIM does not.
+    # Never downgrade :free to a paid OpenRouter endpoint implicitly.
+    if selected == NEMOTRON_OPENROUTER_FREE_MODEL:
+        if current_provider_key("openrouter") or os.environ.get("OPENROUTER_API_KEY", "").strip():
+            return _openrouter_chat(
+                messages, model=selected, temperature=temperature,
+                max_tokens=max_tokens, tools=tools,
+                reasoning_effort=reasoning_effort,
+            )
+        return _nvidia_chat(
+            messages, model=NEMOTRON_NVIDIA_MODEL, temperature=temperature,
+            max_tokens=max_tokens, tools=tools, reasoning_effort=reasoning_effort,
+        )
+    if selected == NEMOTRON_NVIDIA_MODEL:
+        return _nvidia_chat(
+            messages, model=selected, temperature=temperature,
+            max_tokens=max_tokens, tools=tools, reasoning_effort=reasoning_effort,
+        )
     if selected.startswith("google/") and current_provider_key("google"):
         return _google_chat(
             messages,
@@ -186,6 +209,70 @@ def _google_chat(
     return data
 
 
+def _nvidia_chat(
+    messages: List[Dict[str, Any]],
+    *,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    tools: Optional[List[Dict[str, Any]]],
+    reasoning_effort: Optional[str],
+) -> Dict[str, Any]:
+    """NVIDIA Build/NIM OpenAI-compatible chat endpoint.
+
+    The NVIDIA-hosted model omits OpenRouter's :free suffix. Some NVIDIA NIM
+    implementations return the thinking text separately as reasoning_content.
+    """
+    key = current_provider_key("nvidia") or os.environ.get("NVIDIA_API_KEY", "").strip()
+    if not key:
+        raise OpenRouterError(
+            "NVIDIA_API_KEY is required for the direct NVIDIA endpoint. "
+            "For the :free model, alternatively provide OPENROUTER_API_KEY."
+        )
+    if model != NEMOTRON_NVIDIA_MODEL:
+        raise OpenRouterError("unsupported NVIDIA model")
+    body: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+        "chat_template_kwargs": {"enable_thinking": reasoning_effort != "none", "force_nonempty_content": True},
+    }
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+    req = urllib.request.Request(
+        NVIDIA_OPENAI_URL,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_PROVIDER_RESPONSE_BYTES:
+                raise OpenRouterError("NVIDIA response exceeded 4 MB")
+            data = json.loads(raw.decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise OpenRouterError(f"NVIDIA API request failed with HTTP {exc.code}.") from exc
+    except urllib.error.URLError as exc:
+        raise OpenRouterError("NVIDIA API connection failed.") from exc
+    except (ValueError, UnicodeDecodeError, TypeError) as exc:
+        raise OpenRouterError("NVIDIA returned an invalid JSON response.") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("choices"), list):
+        raise OpenRouterError("NVIDIA returned no usable model choices.")
+    data["_vibeagent"] = {
+        "provider": "nvidia-nim",
+        "model": data.get("model") or model,
+        "reasoning_effort": "enabled" if reasoning_effort != "none" else "none",
+    }
+    return data
+
+
 def _gateway_chat(
     messages: List[Dict[str, Any]],
     *,
@@ -256,6 +343,7 @@ def _openrouter_chat(
     temperature: float = 0.2,
     max_tokens: int = 2048,
     tools: Optional[List[Dict[str, Any]]] = None,
+    reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
     key = current_provider_key("openrouter") or os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not key:
@@ -272,6 +360,10 @@ def _openrouter_chat(
     if tools:
         body["tools"] = tools
         body["tool_choice"] = "auto"
+    if model == NEMOTRON_OPENROUTER_FREE_MODEL and reasoning_effort != "none":
+        # Supported for the OpenRouter Nemotron endpoint. Keep thinking
+        # enabled during tool use as well as report synthesis.
+        body["reasoning"] = {"enabled": True}
 
     req = urllib.request.Request(
         OPENROUTER_URL,
@@ -296,7 +388,7 @@ def _openrouter_chat(
     data["_vibeagent"] = {
         "provider": "openrouter",
         "model": data.get("model") or model,
-        "reasoning_effort": "none",
+        "reasoning_effort": "enabled" if model == NEMOTRON_OPENROUTER_FREE_MODEL and reasoning_effort != "none" else "none",
     }
     return data
 
