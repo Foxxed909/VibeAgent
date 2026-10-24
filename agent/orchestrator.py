@@ -135,6 +135,8 @@ def _run_job_impl(
     agent_mode = normalize_agent_mode(agent_mode)
     active_agent = agent_name(agent_mode)
     model = validate_requested_model(model)
+    active_model = model or (os.environ.get("VIBEAGENT_MODEL") or "")
+    nemotron_reasoning = active_model.startswith("nvidia/nemotron-3-ultra-550b-a55b")
     tool_catalog = get_tool_catalog(native=bool(VIBEHACKING_ROOT), agent_mode=agent_mode)
     catalog_names = {tool["function"]["name"] for tool in tool_catalog}
     execution_backend = (execution_backend or "portable").strip().lower()
@@ -366,7 +368,7 @@ def _run_job_impl(
                 messages,
                 model=model,
                 tools=tool_catalog,
-                max_tokens=4096,
+                max_tokens=8192 if nemotron_reasoning else 4096,
                 retries=profile.model_retries,
                 emit=emit,
                 purpose="investigation",
@@ -569,7 +571,7 @@ def _run_job_impl(
                 messages,
                 model=model,
                 tools=None,
-                max_tokens=3072,
+                max_tokens=8192 if nemotron_reasoning else 3072,
                 retries=profile.model_retries,
                 emit=emit,
                 purpose="synthesis",
