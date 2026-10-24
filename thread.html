@@ -200,11 +200,30 @@
       } else if (t === 'final') {
         if (ev.ok && ev.report) {
           finalReport = ev.report;
-          sessionStorage.setItem('vibeagent_last_report', JSON.stringify(ev.report));
-          if (ev.report.job_id) {
-            document.getElementById('job-label').textContent = 'job ' + ev.report.job_id;
-            history.replaceState({}, '', '/thread?job=' + encodeURIComponent(ev.report.job_id));
-            setReportLinks(ev.report.job_id);
+          if (ev.report.browser_only) {
+            // One-time real result. Do not create a durable report link, write
+            // company evidence to sessionStorage or claim cloud persistence.
+            document.getElementById('job-label').textContent = 'private real scan';
+            const download = document.getElementById('demo-json');
+            download.hidden = false;
+            download.textContent = 'Download real JSON';
+            download.onclick = () => {
+              const blob = new Blob([JSON.stringify(ev.report, null, 2)], {type: 'application/json'});
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = 'vibeagent-real-report.json';
+              link.click();
+              URL.revokeObjectURL(url);
+            };
+            row('system', '', 'REAL LIVE SCAN · No server-side report history. Download your result before leaving this page.');
+          } else {
+            sessionStorage.setItem('vibeagent_last_report', JSON.stringify(ev.report));
+            if (ev.report.job_id) {
+              document.getElementById('job-label').textContent = 'job ' + ev.report.job_id;
+              history.replaceState({}, '', '/thread?job=' + encodeURIComponent(ev.report.job_id));
+              setReportLinks(ev.report.job_id);
+            }
           }
           setFindingSummary(ev.report);
           setModel(ev.report.model, ev.report.provider, ev.report.reasoning_effort);
