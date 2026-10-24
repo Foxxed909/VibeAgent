@@ -24,7 +24,7 @@ Portable/serverless tools now include 16 bounded checks: cloud scouting, perimet
 
 The passive Next.js/RSC and cache checks are deliberately observational. They do not claim middleware bypass, RSC data leakage, or exploitability without specific evidence. The native VibeHacking checkout remains the source of deeper platform-specific tools.
 
-When `VIBEHACKING_ROOT` points to a native VibeHacking checkout, additional native capabilities may be exposed.
+When `VIBEHACKING_ROOT` points to a native VibeHacking checkout, additional specialist auditors are available: `aukdoc`, `axios`, `smuggle_probe`, `header_inject`, and `biz_logic`. These tools require the local VibeHacking scripts and are not exposed through the default hosted worker bridge.
 
 ### BreakAgent
 
