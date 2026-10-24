@@ -71,6 +71,11 @@ class handler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": "queued stress mode and dry-run are not supported"})
         if not require_scan_access(self, data.get("access_code")):
             return
+        try:
+            if not worker_online():
+                return self._json(503, {"ok": False, "error": "No durable scan worker is online. Start the worker before submitting queued scans."})
+        except Exception:
+            return self._json(503, {"ok": False, "error": "Worker availability could not be checked"})
         targets = data.get("targets") or []
         if isinstance(targets, str):
             targets = [x.strip() for x in targets.splitlines() if x.strip()]
