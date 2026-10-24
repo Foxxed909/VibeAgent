@@ -315,8 +315,9 @@
 
     async function verificationRequest(action) {
       const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
-      if (targets.length !== 1) {
-        verifyMessage.textContent = "Enter exactly one target first.";
+      const selectedTarget = verifyTargetSelect.value;
+      if (!selectedTarget || !targets.includes(selectedTarget)) {
+        verifyMessage.textContent = "Select a listed target first.";
         return;
       }
       verifyMessage.textContent = action === "challenge" ? "Creating challenge…" : "Checking verification file…";
@@ -325,7 +326,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            target: targets[0],
+            target: selectedTarget,
             action,
             access_code: document.getElementById("access_code").value.trim() || null,
           }),
@@ -341,10 +342,12 @@
           verifyMessage.textContent = "Challenge created. Publish the token, then tap Confirm verification.";
         } else {
           if (data.proof) {
-            ownershipProofs[targets[0]] = data.proof;
+            ownershipProofs[selectedTarget] = data.proof;
             sessionStorage.setItem("vibeagent_ownership_proofs", JSON.stringify(ownershipProofs));
           }
-          verifyMessage.textContent = "Ownership verified. Live scans are now available for this host.";
+          confirmedTargets.add(selectedTarget);
+          sessionStorage.setItem("vibeagent_verified_targets", JSON.stringify([...confirmedTargets]));
+          verifyMessage.textContent = "Ownership verified for " + selectedTarget + ".";
           verifyChallenge.style.display = "none";
           await refreshWorkerAvailability();
         }
@@ -370,8 +373,8 @@
       }
       const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
       if (!targets.length) { err.textContent = "Add at least one target."; err.hidden = false; return; }
-      if (targets.length === 1 && !targetVerified) {
-        err.textContent = "Verify ownership of the target before launching a live scan."; err.hidden = false; return;
+      if (targets.some(t => !confirmedTargets.has(t) && !ownershipProofs[t] && !(targets.length === 1 && targetVerified))) {
+        err.textContent = "Verify every hostname before launching a live scan."; err.hidden = false; return;
       }
 
       const effectiveTier = tier;
