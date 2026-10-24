@@ -47,6 +47,7 @@ def execute(job_id: str, worker_id: str) -> None:
     def pulse() -> None:
         while not stop.wait(20):
             try:
+                queue_store.touch_worker(worker_id)
                 if not queue_store.heartbeat(job_id, worker_id):
                     lease_lost.set()
                     return
