@@ -8,6 +8,7 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 MAX_JSON_BODY_BYTES = int(os.environ.get("VIBE_AGENT_MAX_JSON_BODY_BYTES", "16384"))
+MAX_PROVIDER_KEY_LENGTH = 512
 
 
 def _configured_origins() -> set[str]:
@@ -145,3 +146,24 @@ def read_json_body(handler) -> tuple[Optional[bytes], Optional[str], int]:
     if len(raw) != length:
         return None, "incomplete request body", 400
     return raw, None, 200
+
+
+def parse_provider_keys(data: dict) -> tuple[Optional[dict[str, str]], Optional[str]]:
+    raw = data.get("provider_keys", {})
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        return None, "provider_keys must be an object"
+    unknown = set(raw) - {"openai", "google", "openrouter", "gateway"}
+    if unknown:
+        return None, "provider_keys contains an unsupported provider"
+    clean: dict[str, str] = {}
+    for provider, value in raw.items():
+        if not isinstance(value, str):
+            return None, "provider keys must contain strings"
+        value = value.strip()
+        if len(value) > MAX_PROVIDER_KEY_LENGTH:
+            return None, "provider key is too long"
+        if value:
+            clean[provider] = value
+    return clean, None

@@ -12,8 +12,11 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from .request_context import current_provider_key
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 AI_GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions"
+GOOGLE_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 MAX_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
 
 FREE_MODELS = [
@@ -72,6 +75,15 @@ def chat(
 ) -> Dict[str, Any]:
     model = validate_requested_model(model)
     selected = model or (os.environ.get("VIBEAGENT_MODEL") or "").strip()
+    if selected.startswith("google/") and current_provider_key("google"):
+        return _google_chat(
+            messages,
+            model=selected.split("/", 1)[1],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            reasoning_effort=reasoning_effort,
+        )
     if "/" in selected or (os.environ.get("VIBE_AGENT_MODEL_PROVIDER") or "").strip().lower() == "gateway":
         return _gateway_chat(
             messages,
@@ -81,7 +93,7 @@ def chat(
             tools=tools,
             reasoning_effort=reasoning_effort,
         )
-    if os.environ.get("OPENAI_API_KEY", "").strip():
+    if current_provider_key("openai") or os.environ.get("OPENAI_API_KEY", "").strip():
         from .openai_client import chat as openai_chat, DEFAULT_MODEL as OAI_DEFAULT
 
         return openai_chat(
@@ -101,6 +113,60 @@ def chat(
     )
 
 
+def _google_chat(
+    messages: List[Dict[str, Any]],
+    *,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    tools: Optional[List[Dict[str, Any]]],
+    reasoning_effort: Optional[str],
+) -> Dict[str, Any]:
+    key = current_provider_key("google")
+    if not key:
+        raise OpenRouterError("A Google Gemini API key is required for this model.")
+
+    body: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }
+    if temperature is not None:
+        body["temperature"] = temperature
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+    if reasoning_effort and reasoning_effort != "none":
+        body["reasoning_effort"] = reasoning_effort
+
+    req = urllib.request.Request(
+        GOOGLE_OPENAI_URL,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_PROVIDER_RESPONSE_BYTES:
+                raise OpenRouterError("Google Gemini response exceeded 4 MB")
+            data = json.loads(raw.decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise OpenRouterError(f"Google Gemini API request failed with HTTP {exc.code}.") from exc
+    except urllib.error.URLError as exc:
+        raise OpenRouterError(f"Google Gemini request failed: {exc.reason}") from exc
+
+    data["_vibeagent"] = {
+        "provider": "google-gemini-api",
+        "model": data.get("model") or model,
+        "reasoning_effort": reasoning_effort or "none",
+    }
+    return data
+
+
 def _gateway_chat(
     messages: List[Dict[str, Any]],
     *,
@@ -111,7 +177,8 @@ def _gateway_chat(
     reasoning_effort: Optional[str],
 ) -> Dict[str, Any]:
     key = (
-        os.environ.get("AI_GATEWAY_API_KEY", "").strip()
+        current_provider_key("gateway")
+        or os.environ.get("AI_GATEWAY_API_KEY", "").strip()
         or os.environ.get("VERCEL_OIDC_TOKEN", "").strip()
     )
     if not key:
@@ -151,8 +218,7 @@ def _gateway_chat(
                 raise OpenRouterError("AI Gateway response exceeded 4 MB")
             data = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        detail = exc.read(2000).decode("utf-8", errors="replace")
-        raise OpenRouterError(f"AI Gateway HTTP {exc.code}: {detail}") from exc
+        raise OpenRouterError(f"AI Gateway request failed with HTTP {exc.code}.") from exc
     except urllib.error.URLError as exc:
         raise OpenRouterError(f"AI Gateway request failed: {exc.reason}") from exc
 
@@ -172,7 +238,7 @@ def _openrouter_chat(
     max_tokens: int = 2048,
     tools: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    key = current_provider_key("openrouter") or os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not key:
         raise OpenRouterError(
             "Neither OPENAI_API_KEY nor OPENROUTER_API_KEY is set."
@@ -206,8 +272,7 @@ def _openrouter_chat(
                 raise OpenRouterError("OpenRouter response exceeded 4 MB")
             data = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as e:
-        detail = e.read(2000).decode("utf-8", errors="replace")
-        raise OpenRouterError(f"OpenRouter HTTP {e.code}: {detail}") from e
+        raise OpenRouterError(f"OpenRouter request failed with HTTP {e.code}.") from e
 
     data["_vibeagent"] = {
         "provider": "openrouter",

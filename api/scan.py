@@ -16,7 +16,13 @@ from agent.orchestrator import run_job
 from agent.job_store import save_job, backend_name
 from agent.product import resolve_depth, resolve_stress
 from agent.target_verification import is_target_verified
-from api._security import apply_cors, read_json_body, require_allowed_origin, require_scan_access
+from api._security import (
+    apply_cors,
+    parse_provider_keys,
+    read_json_body,
+    require_allowed_origin,
+    require_scan_access,
+)
 
 
 class handler(BaseHTTPRequestHandler):
@@ -39,6 +45,9 @@ class handler(BaseHTTPRequestHandler):
         )
         if any(data.get(key) is not None and not isinstance(data.get(key), str) for key in text_fields):
             return self._json(400, {"ok": False, "error": "text fields must contain strings"})
+        provider_keys, provider_error = parse_provider_keys(data)
+        if provider_error:
+            return self._json(400, {"ok": False, "error": provider_error})
 
         targets = data.get("targets") or []
         if isinstance(targets, str):
@@ -102,6 +111,7 @@ class handler(BaseHTTPRequestHandler):
                 agent_mode=agent_mode,
                 execution_backend=execution_backend,
                 ownership_proofs=ownership_proofs,
+                provider_keys=provider_keys,
             )
             try:
                 save_job(report)

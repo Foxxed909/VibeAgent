@@ -34,7 +34,12 @@ from .worker_client import (
     target_host,
 )
 from .target_verification import is_target_verified
-from .request_context import reset_cookie, set_cookie
+from .request_context import (
+    reset_cookie,
+    reset_provider_keys,
+    set_cookie,
+    set_provider_keys,
+)
 from . import job_store as _job_store
 
 try:
@@ -76,8 +81,10 @@ def run_job(
     agent_mode: str = "vibe",
     execution_backend: str = "portable",
     ownership_proofs: Optional[Dict[str, str]] = None,
+    provider_keys: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     cookie_token = set_cookie(cookie)
+    provider_keys_token = set_provider_keys(provider_keys)
     try:
         return _run_job_impl(
             auth,
@@ -94,6 +101,7 @@ def run_job(
             ownership_proofs=ownership_proofs,
         )
     finally:
+        reset_provider_keys(provider_keys_token)
         reset_cookie(cookie_token)
 
 

@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -14,7 +15,15 @@ from agent.orchestrator import run_job
 from agent import orchestrator
 from agent.net_safety import NetworkSafetyError, request_url, validate_outbound_url
 from agent.models import OpenRouterError, chat as model_chat, validate_requested_model
-from agent.request_context import current_cookie, reset_cookie, set_cookie
+from agent.openai_client import OpenAIError
+from agent.request_context import (
+    current_cookie,
+    current_provider_key,
+    reset_cookie,
+    reset_provider_keys,
+    set_cookie,
+    set_provider_keys,
+)
 from agent.scope import Authorization, CONFIRM_PHRASE, ScopeError, host_in_scope, is_valid_trial_code
 from agent import target_verification
 from api._security import (
@@ -22,6 +31,7 @@ from api._security import (
     read_json_body,
     require_scan_access,
     require_workspace_access,
+    parse_provider_keys,
 )
 
 
@@ -293,6 +303,87 @@ class ModelPolicyTests(unittest.TestCase):
         self.assertEqual("google/gemini-3-flash", captured["body"]["model"])
         self.assertEqual("vercel-ai-gateway", result["_vibeagent"]["provider"])
 
+    def test_user_google_key_routes_directly_to_gemini(self):
+        captured = {}
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, _limit):
+                return b'{"choices":[{"message":{"content":"reviewed"}}],"model":"gemini-3-flash"}'
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["authorization"] = request.headers.get("Authorization")
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return Response()
+
+        with patch.dict(os.environ, {"VIBE_AGENT_ALLOWED_MODELS": "google/gemini-3-flash"}, clear=True):
+            token = set_provider_keys({"google": "user-google-key"})
+            try:
+                with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                    result = model_chat(
+                        [{"role": "user", "content": "review"}],
+                        model="google/gemini-3-flash",
+                    )
+            finally:
+                reset_provider_keys(token)
+        self.assertEqual(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            captured["url"],
+        )
+        self.assertEqual("Bearer user-google-key", captured["authorization"])
+        self.assertEqual("gemini-3-flash", captured["body"]["model"])
+        self.assertEqual("google-gemini-api", result["_vibeagent"]["provider"])
+
+    def test_user_openai_key_is_used_by_openai_client(self):
+        captured = {}
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, _limit):
+                return b'{"choices":[{"message":{"content":"planned"}}],"model":"gpt-6-luna"}'
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["authorization"] = request.headers.get("Authorization")
+            return Response()
+
+        with patch.dict(os.environ, {"VIBE_AGENT_ALLOWED_MODELS": "gpt-6-luna"}, clear=True):
+            token = set_provider_keys({"openai": "user-openai-key"})
+            try:
+                with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                    model_chat([{"role": "user", "content": "plan"}], model="gpt-6-luna")
+            finally:
+                reset_provider_keys(token)
+        self.assertEqual("https://api.openai.com/v1/chat/completions", captured["url"])
+        self.assertEqual("Bearer user-openai-key", captured["authorization"])
+
+    def test_provider_error_body_does_not_echo_user_key(self):
+        secret = "user-openai-key"
+        body = f'{{"error":"Incorrect key: {secret}"}}'.encode()
+        error = urllib.error.HTTPError(
+            "https://api.openai.com/v1/chat/completions", 401, "Unauthorized", {}, io.BytesIO(body)
+        )
+        with patch.dict(os.environ, {"VIBE_AGENT_ALLOWED_MODELS": "gpt-6-luna"}, clear=True):
+            token = set_provider_keys({"openai": secret})
+            try:
+                with patch("urllib.request.urlopen", side_effect=error):
+                    with self.assertRaises(OpenAIError) as caught:
+                        model_chat([{"role": "user", "content": "plan"}], model="gpt-6-luna")
+            finally:
+                reset_provider_keys(token)
+        self.assertNotIn(secret, str(caught.exception))
+
 
 class RequestContextTests(unittest.TestCase):
     def test_cookie_context_resets(self):
@@ -302,6 +393,27 @@ class RequestContextTests(unittest.TestCase):
         finally:
             reset_cookie(token)
         self.assertEqual("", current_cookie())
+
+    def test_provider_keys_are_request_local_and_reset(self):
+        token = set_provider_keys({"openai": "openai-secret", "unsupported": "ignored"})
+        try:
+            self.assertEqual("openai-secret", current_provider_key("openai"))
+            self.assertEqual("", current_provider_key("unsupported"))
+        finally:
+            reset_provider_keys(token)
+        self.assertEqual("", current_provider_key("openai"))
+
+    def test_orchestrator_does_not_persist_or_retain_provider_keys(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["https://demo.vercel.app"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Demo",
+        )
+        secret = "user-provider-secret"
+        report = run_job(auth, dry_run=True, provider_keys={"openai": secret})
+        self.assertNotIn(secret, json.dumps(report))
+        self.assertEqual("", current_provider_key("openai"))
 
     def test_orchestrator_does_not_leak_cookie_after_job(self):
         auth = Authorization(
@@ -340,6 +452,20 @@ class OriginGuardTests(unittest.TestCase):
 
 
 class APIAccessTests(unittest.TestCase):
+    def test_provider_key_parser_accepts_only_known_bounded_values(self):
+        keys, error = parse_provider_keys({"provider_keys": {"openai": " sk-user ", "google": "gemini"}})
+        self.assertIsNone(error)
+        self.assertEqual({"openai": "sk-user", "google": "gemini"}, keys)
+        keys, error = parse_provider_keys({"provider_keys": {"evil": "secret"}})
+        self.assertIsNone(keys)
+        self.assertIn("unsupported provider", error)
+        keys, error = parse_provider_keys({"provider_keys": {"openai": "x" * 513}})
+        self.assertIsNone(keys)
+        self.assertIn("too long", error)
+        keys, error = parse_provider_keys({"provider_keys": []})
+        self.assertIsNone(keys)
+        self.assertIn("must be an object", error)
+
     def test_scan_access_fails_closed_when_unconfigured(self):
         handler = _ResponseHandler()
         with patch.dict(os.environ, {}, clear=True):
