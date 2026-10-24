@@ -68,6 +68,11 @@
       <button type="button" data-agent="break">BreakAgent · validate</button>
     </div>
     <p class="hint" id="agent-hint">VibeAgent maps the authorized surface and follows evidence autonomously.</p>
+    <div class="verify-box" style="display:block;background:rgba(34,197,94,.075);margin:16px 0 24px">
+      <strong>Just looking around? Try a sample scan.</strong>
+      <p class="hint" style="margin:8px 0 12px">No API key, invite, ownership challenge, target URL or payment needed. This demonstrates the interface using fictional results — it does not contact, scan, or assess a website.</p>
+      <button type="button" id="launch-demo" style="background:#22c55e;color:#071b10;border:0;border-radius:8px;padding:12px 20px;font-weight:800;width:100%;cursor:pointer">Try the selected agent · Demo</button>
+    </div>
 
     <div class="tier-toggle">
       <button type="button" class="active" data-tier="hobby">Hobby</button>
@@ -195,6 +200,10 @@
     const CONFIRM = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS";
     let tier = "hobby";
     let agentMode = "vibe";
+    document.getElementById("launch-demo").addEventListener("click", () => {
+      // Client-only simulation. Real scans still require authorization and ownership proof.
+      location.href = "/thread?demo=" + encodeURIComponent(agentMode);
+    });
     const vibeBtn = document.querySelector('[data-agent="vibe"]');
     const breakBtn = document.querySelector('[data-agent="break"]');
     const hobbyBtn = document.querySelector('[data-tier="hobby"]');
