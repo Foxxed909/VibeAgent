@@ -228,6 +228,13 @@
     const USER_KEYS_STORE = "vibeagent_user_provider_keys_v1";
     function loadPersonalKeys() {
       const status = document.getElementById("keys-connection-status");
+      // Admin-only key belongs to this origin's self-hosted deployment.
+      // It is never populated from provider keys or a platform owner account.
+      const ownOperatorKey = sessionStorage.getItem("vibeagent_selfhost_operator_token_v1") || "";
+      const ownOperatorField = document.getElementById("scan_api_token");
+      if (ownOperatorKey && ownOperatorField && !ownOperatorField.value) {
+        ownOperatorField.value = ownOperatorKey;
+      }
       try {
         const keys = JSON.parse(sessionStorage.getItem(USER_KEYS_STORE) || "{}");
         const names = ["openrouter", "openai", "nvidia", "google"];
