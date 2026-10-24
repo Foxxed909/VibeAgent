@@ -55,10 +55,13 @@ def append_event(job_id: str, event: Dict[str, Any]) -> str:
     if len(raw) > 16000:
         record = {"type": "notice", "text": "Oversized event was suppressed", "ts": time.time()}
         raw = json.dumps(record)
-    return str(job_store._kv_command(
-        "XADD", _key("events", job_id), "MAXLEN", "~", EVENT_LIMIT,
+    event_key = _key("events", job_id)
+    cursor = job_store._kv_command(
+        "XADD", event_key, "MAXLEN", "~", EVENT_LIMIT,
         "*", "data", raw
-    ))
+    )
+    job_store._kv_command("EXPIRE", event_key, job_store.TTL_SECONDS)
+    return str(cursor)
 
 
 def read_events(job_id: str, after: str = "0-0", limit: int = 100) -> List[Dict[str, Any]]:
