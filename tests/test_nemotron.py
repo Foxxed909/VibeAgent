@@ -142,6 +142,26 @@ class NemotronProviderTests(unittest.TestCase):
         self.assertEqual(NEMOTRON_NVIDIA_MODEL, captured["body"]["model"])
         self.assertEqual("nvidia-nim", result["_vibeagent"]["provider"])
 
+    def test_explicit_nvidia_byok_precedes_server_openrouter_key(self):
+        captured = {}
+
+        def request(req, timeout):
+            captured["url"] = req.full_url
+            return FakeResponse()
+
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "ambient-key"}):
+            token = set_provider_keys({"nvidia": "explicit-nvidia"})
+            try:
+                with patch("urllib.request.urlopen", side_effect=request):
+                    result = chat(
+                        [{"role": "user", "content": "review"}],
+                        model=NEMOTRON_OPENROUTER_FREE_MODEL,
+                    )
+            finally:
+                reset_provider_keys(token)
+        self.assertEqual("https://integrate.api.nvidia.com/v1/chat/completions", captured["url"])
+        self.assertEqual("nvidia-nim", result["_vibeagent"]["provider"])
+
     def test_explicit_nvidia_selection_does_not_use_openrouter_key(self):
         token = set_provider_keys({"openrouter": "or-byok"})
         try:
