@@ -28,6 +28,8 @@ from api._security import (
     require_allowed_origin,
     require_scan_access,
     require_operator_scan_access,
+    customer_keys_required,
+    personal_key_error,
 )
 
 
@@ -114,6 +116,10 @@ class handler(BaseHTTPRequestHandler):
             return
         dry = bool(data.get("dry_run"))
         browser_only = data.get("browser_only") is True
+        if browser_only or customer_keys_required():
+            key_problem = personal_key_error(model or (os.environ.get("VIBEAGENT_MODEL") or ""), provider_keys)
+            if key_problem:
+                return self._json(400, {"ok": False, "error": key_problem})
         if "browser_only" in data and not isinstance(data["browser_only"], bool):
             return self._json(400, {"ok": False, "error": "browser_only must be a boolean"})
         if browser_only:
