@@ -59,6 +59,7 @@
 <body>
   <div class="container">
     <a class="back" href="/app">← Workspace</a>
+    <a class="back" href="/settings" style="float:right">⚙ Settings · Keys</a>
     <h1>Start a scan</h1>
     <p class="sub">Exact targets only. Live agent stream opens as soon as you launch.</p>
 
@@ -89,9 +90,12 @@
       <label for="access_code">Private invite code (optional)</label>
       <input id="access_code" name="access_code" placeholder="Enter a private invite if you have one" autocomplete="off" />
       <p class="hint">Invite codes are private and validated only on the server.</p>
-      <label for="scan_api_token">Self-hosted scan API token (alternative to an invite)</label>
-      <input id="scan_api_token" name="scan_api_token" type="password" autocomplete="new-password" spellcheck="false" placeholder="VIBE_AGENT_API_TOKEN from your Vercel project" />
-      <p class="hint">For deployments you control: enter the matching VIBE_AGENT_API_TOKEN. Sent in the X-VibeAgent-Token header, never saved in reports. This is not a Vercel account token.</p>
+      <details style="margin:12px 0;border:1px solid var(--border);padding:12px;border-radius:8px">
+        <summary style="cursor:pointer">Deployment administrator (self-hosted only)</summary>
+        <label for="scan_api_token">Private deployment operator token</label>
+        <input id="scan_api_token" name="scan_api_token" type="password" autocomplete="new-password" spellcheck="false" placeholder="Only YOUR self-hosted deployment's VIBE_AGENT_API_TOKEN" />
+        <p class="hint">This is NOT a customer API key. Customers must not be given the service owner's operator token. Self-hosted operators enter their own token to approve exact hosts; never share it between companies.</p>
+      </details>
 
       <div id="hobby-fields">
         <label for="app_name">App / project name</label>
@@ -187,6 +191,11 @@
       </select>
       <p class="hint">Nemotron 3 Ultra is the default. Both agents use hypothesis-driven red-team reasoning and controlled evidence checks inside verified scope; report synthesis requests deeper reasoning where supported.</p>
 
+      <div style="border:1px solid #35634b;border-radius:10px;padding:14px;margin:16px 0;background:rgba(34,197,94,.05)">
+        <strong>Each company uses its own model keys</strong>
+        <p class="hint">Manage your OpenRouter, OpenAI and NVIDIA credentials in <a href="/settings" style="color:#86efac">Settings → Keys</a>. Keys saved for this tab automatically appear below. Saving on the Settings page never uploads keys.</p>
+        <p class="hint" id="keys-connection-status" role="status">Checking this tab's keys…</p>
+      </div>
       <label for="openai_api_key">OpenAI API key</label>
       <input id="openai_api_key" name="openai_api_key" type="password" required placeholder="sk-…" autocomplete="new-password" spellcheck="false" />
       <p class="hint">OpenAI models use an API key, not a ChatGPT subscription login.</p>
@@ -214,6 +223,27 @@
 
   <script>
     const CONFIRM = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS";
+    // Settings → Keys is tab-scoped. Never fetch keys from another user,
+    // an admin endpoint, the server environment, or another website.
+    const USER_KEYS_STORE = "vibeagent_user_provider_keys_v1";
+    function loadPersonalKeys() {
+      const status = document.getElementById("keys-connection-status");
+      try {
+        const keys = JSON.parse(sessionStorage.getItem(USER_KEYS_STORE) || "{}");
+        const names = ["openrouter", "openai", "nvidia", "google"];
+        const count = names.filter(name => typeof keys[name] === "string" && keys[name]).length;
+        for (const name of names) {
+          if (typeof keys[name] !== "string" || !keys[name]) continue;
+          const field = document.getElementById(name + "_api_key");
+          if (field && !field.value) field.value = keys[name];
+        }
+        status.textContent = count
+          ? count + " personal provider key(s) loaded from this tab; no owner keys were shared."
+          : "No personal keys saved. Open Settings → Keys, or enter one below for this scan.";
+      } catch {
+        status.textContent = "Personal keys unavailable in this tab. Enter keys directly for this scan.";
+      }
+    }
     let tier = "hobby";
     let agentMode = "vibe";
     document.getElementById("launch-demo").addEventListener("click", () => {
@@ -619,6 +649,7 @@
       location.href = "/thread?live=1";
     };
 
+    loadPersonalKeys();
     updateStressState();
     syncQueueMode();
     queueCapabilityRefresh();
