@@ -60,8 +60,18 @@ code{color:#befbd5;overflow-wrap:anywhere}footer{padding:25px 0;font-size:12px;c
     <h2>Company access and permissions</h2>
     <p><strong>Provider keys are not admin permissions.</strong> You still need your own company authorization and an approved target. An invite to use the service is separate from permission to test a particular organization.</p>
     <details>
-      <summary>Self-hosted deployment administrators only</summary>
-      <p>A self-hosted deployment administrator configures its own <code>VIBE_AGENT_API_TOKEN</code>, <code>VIBE_AGENT_VERIFICATION_SECRET</code> and optional exact host approvals in its own private Vercel project. Customers must never receive the deployment owner's admin token. Do not enter the product owner's admin token in this Keys page.</p>
+      <summary>Advanced · my self-hosted deployment operator key</summary>
+      <p>Only for people who deployed their <strong>own copy</strong> of VibeAgent: enter the private <code>VIBE_AGENT_API_TOKEN</code> belonging to that deployment. This isn't a customer access key and does not authorize use of someone else's Vercel or company systems.</p>
+      <form id="operator-form" autocomplete="off">
+        <label for="selfhost-token">My self-hosted operator token</label>
+        <input id="selfhost-token" type="password" autocomplete="new-password" spellcheck="false" placeholder="Your deployment's private token" maxlength="512" />
+        <div class="buttons">
+          <button type="submit">Save operator token for this tab</button>
+          <button type="button" id="clear-operator" class="danger">Clear operator token</button>
+        </div>
+        <p id="operator-status" role="status" aria-live="polite">Not configured.</p>
+      </form>
+      <p>Each company that self-hosts has its <strong>own</strong> operator token, own provider keys, and private infrastructure. A shared SaaS needs real company accounts and scoped permissions, not this token field.</p>
     </details>
     <div class="notice"><strong>Privacy:</strong> This is a tab-only convenience, not an encrypted multi-user key vault. Anyone who can run scripts in this browser tab could read its session storage. Don't use it on shared devices. Close the tab or clear your keys when finished. Permanent per-company vaults require separate authenticated accounts, tenant isolation, encryption and revocation.</div>
   </section>
@@ -71,6 +81,7 @@ code{color:#befbd5;overflow-wrap:anywhere}footer{padding:25px 0;font-size:12px;c
 (() => {
   "use strict";
   const STORE = "vibeagent_user_provider_keys_v1";
+  const OPERATOR_STORE = "vibeagent_selfhost_operator_token_v1";
   const IDS = ["openrouter", "nvidia", "openai", "google"];
   const status = document.getElementById("keys-status");
   function clearFields() { for (const id of IDS) document.getElementById(id).value = ""; }
@@ -102,6 +113,26 @@ code{color:#befbd5;overflow-wrap:anywhere}footer{padding:25px 0;font-size:12px;c
     sessionStorage.removeItem(STORE);
     clearFields();
     status.textContent = "Saved provider keys cleared from this tab.";
+  });
+  const operatorInput = document.getElementById("selfhost-token");
+  const operatorStatus = document.getElementById("operator-status");
+  operatorInput.value = sessionStorage.getItem(OPERATOR_STORE) || "";
+  if (operatorInput.value) operatorStatus.textContent = "Self-hosted token loaded for this tab.";
+  document.getElementById("operator-form").addEventListener("submit", event => {
+    event.preventDefault();
+    const value = operatorInput.value.trim();
+    if (value && value.length < 32) {
+      operatorStatus.textContent = "Use a strong 32+ character token from your own deployment.";
+      return;
+    }
+    if (value) sessionStorage.setItem(OPERATOR_STORE, value);
+    else sessionStorage.removeItem(OPERATOR_STORE);
+    operatorStatus.textContent = value ? "Self-hosted operator token saved for this tab." : "No operator token saved.";
+  });
+  document.getElementById("clear-operator").addEventListener("click", () => {
+    sessionStorage.removeItem(OPERATOR_STORE);
+    operatorInput.value = "";
+    operatorStatus.textContent = "Self-hosted operator token cleared from this tab.";
   });
 })();
 </script>
