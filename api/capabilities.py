@@ -13,6 +13,7 @@ if ROOT not in sys.path:
 
 from agent.worker_client import native_worker_capabilities, remote_audit_capabilities
 from agent.target_verification import is_target_verified
+from agent.queue_store import require_queue, worker_online
 from api._security import apply_cors, require_allowed_origin
 
 
