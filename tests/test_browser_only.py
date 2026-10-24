@@ -29,6 +29,7 @@ def request(approval, **changes):
         "execution_backend": "portable",
         "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
         "browser_only": True,
+        "provider_keys": {"openrouter": "user-provided-test-key"},
         "ownership_proofs": {HOST: approval},
     }
     body.update(changes)
