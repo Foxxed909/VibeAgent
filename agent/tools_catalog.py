@@ -44,6 +44,11 @@ ALL_VIBEHACKING_TOOLS: List[Dict[str, Any]] = [
     _tool("nextjs_rsc_audit", "Read-only Next.js and RSC surface reconnaissance; never claims middleware bypass."),
     _tool("redirect", "Check common open-redirect parameters with an inert external canary and no redirect following."),
     _tool("cache_audit", "Observe candidate private-route caching policy and report evidence, not inferred disclosure."),
+    _tool("aukdoc", "Native VibeHacking authentication-boundary auditor; requires the local VibeHacking runtime."),
+    _tool("axios", "Native object-level authorization and ID exposure verifier; requires VibeHacking."),
+    _tool("smuggle_probe", "Native HTTP verb, cache and protocol consistency auditor; requires VibeHacking."),
+    _tool("header_inject", "Native header and Host handling auditor; requires VibeHacking."),
+    _tool("biz_logic", "Native business-logic and parameter consistency auditor; requires VibeHacking."),
     _tool(
         "bot_breaker",
         "Native VibeHacking perimeter challenge diagnostic for owner-authorized targets. Requires the full VibeHacking runtime.",
@@ -61,7 +66,7 @@ PORTABLE_TOOL_NAMES = {
     "api_check", "nextjs_rsc_audit", "redirect", "cache_audit",
 }
 
-VIBE_NATIVE_EXTRA = {"bot_breaker", "poc_gen"}
+VIBE_NATIVE_EXTRA = {"bot_breaker", "poc_gen", "aukdoc", "axios", "smuggle_probe", "header_inject", "biz_logic"}
 
 # BreakAgent is deliberately validation-focused. It can confirm control behavior,
 # exposure signals, session policy and authorization boundaries, but it does not
@@ -71,7 +76,7 @@ BREAK_PORTABLE_TOOL_NAMES = {
     "leep", "env_probe", "ghost", "api_finder", "senoria",
     "api_check", "nextjs_rsc_audit", "redirect", "cache_audit",
 }
-BREAK_NATIVE_EXTRA = {"poc_gen"}
+BREAK_NATIVE_EXTRA = {"poc_gen", "aukdoc", "axios", "smuggle_probe", "header_inject", "biz_logic"}
 
 
 def normalize_agent_mode(value: str | None) -> str:
