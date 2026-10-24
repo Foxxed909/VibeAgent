@@ -149,10 +149,29 @@ const setTimeout = callback => callback();
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_keys_settings_keeps_user_credentials_in_tab_and_separate_from_admin(self):
+        page = (ROOT / "settings.html").read_text(encoding="utf-8")
+        scan = (ROOT / "scan.html").read_text(encoding="utf-8")
+        self.assertIn('id="keys-form"', page)
+        self.assertIn('id="operator-form"', page)
+        self.assertIn('id="selfhost-token"', page)
+        self.assertIn("vibeagent_user_provider_keys_v1", page)
+        self.assertIn("vibeagent_selfhost_operator_token_v1", page)
+        self.assertIn("sessionStorage.setItem(STORE", page)
+        self.assertIn("sessionStorage.removeItem(STORE)", page)
+        self.assertIn("sessionStorage.setItem(OPERATOR_STORE", page)
+        self.assertIn("sessionStorage.removeItem(OPERATOR_STORE)", page)
+        self.assertNotIn("localStorage", page)
+        self.assertNotIn("fetch(", page)
+        self.assertIn('href="/settings"', scan)
+        self.assertIn('const USER_KEYS_STORE = "vibeagent_user_provider_keys_v1";', scan)
+        self.assertIn('document.getElementById(name + "_api_key")', scan)
+        self.assertIn("vibeagent_selfhost_operator_token_v1", scan)
+
     def test_browser_inline_scripts_have_valid_javascript(self):
         if not shutil.which("node"):
             self.skipTest("Node.js unavailable")
-        for name in ("index.html", "app.html", "scan.html", "thread.html", "deploy.html"):
+        for name in ("index.html", "app.html", "scan.html", "thread.html", "deploy.html", "settings.html"):
             with self.subTest(page=name):
                 parser = InlineScripts()
                 parser.feed((ROOT / name).read_text(encoding="utf-8"))
