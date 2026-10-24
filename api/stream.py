@@ -19,7 +19,7 @@ from agent.models import OpenRouterError, validate_requested_model
 from agent.orchestrator import run_job
 from agent.job_store import save_job, ensure_durable_store
 from agent.product import resolve_depth, resolve_stress
-from agent.target_verification import is_target_verified
+from agent.target_verification import is_target_verified, is_operator_approved_proof
 from api._security import (
     apply_cors,
     parse_provider_keys,
@@ -100,6 +100,10 @@ class handler(BaseHTTPRequestHandler):
         stress_m, stress_mode = resolve_stress(
             auth.tier, auth.access_code, data.get("stress_multiplier"), data.get("stress_mode")
         )
+        if any(is_operator_approved_proof(t, ownership_proofs.get(normalize_target(t))) for t in targets):
+            if depth != "quick" or stress_m:
+                self._json(400, {"ok": False, "error": "operator-approved assessment requires Quick depth with stress disabled"})
+                return
         cookie = (data.get("cookie") or "").strip() or None
         try:
             model = validate_requested_model(data.get("model") or None)
