@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from agent.orchestrator import run_job
+from agent.models import OpenRouterError
 from agent.scope import Authorization, CONFIRM_PHRASE
 from agent.tools_catalog import (
     agent_name,
@@ -190,6 +191,26 @@ class AgentModeTests(unittest.TestCase):
         self.assertEqual(1, report["loop"]["duplicate_calls_skipped"])
         self.assertEqual("completed", report["loop"]["phase"])
         self.assertIn("## Findings", report["report_text"])
+
+    def test_model_transport_failure_sets_failed_status(self):
+        auth = Authorization(tier="hobby", targets=["https://example.com"],
+                             confirmation=CONFIRM_PHRASE, app_name="Demo")
+        final = {"choices": [{"message": {"content": "## Findings"}}]}
+        with patch.dict(os.environ, {"VIBE_AGENT_REVIEW_MODEL": ""}, clear=False), patch(
+            "agent.orchestrator.get_forced_tools", return_value=[]
+        ), patch("agent.orchestrator.chat", side_effect=[OpenRouterError("provider down"), final]):
+            report = run_job(auth, depth="quick")
+        self.assertEqual("failed", report["status"])
+
+    def test_missing_model_choices_sets_failed_status(self):
+        auth = Authorization(tier="hobby", targets=["https://example.com"],
+                             confirmation=CONFIRM_PHRASE, app_name="Demo")
+        final = {"choices": [{"message": {"content": "## Findings"}}]}
+        with patch.dict(os.environ, {"VIBE_AGENT_REVIEW_MODEL": ""}, clear=False), patch(
+            "agent.orchestrator.get_forced_tools", return_value=[]
+        ), patch("agent.orchestrator.chat", side_effect=[{"choices": []}, final]):
+            report = run_job(auth, depth="quick")
+        self.assertEqual("failed", report["status"])
 
 
 if __name__ == "__main__":
