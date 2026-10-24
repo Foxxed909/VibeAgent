@@ -18,6 +18,7 @@ from agent.scope import Authorization, ScopeError, normalize_target
 from agent.models import OpenRouterError, validate_requested_model
 from agent.orchestrator import run_job
 from agent.job_store import save_job, ensure_durable_store
+from agent.web_scan_policy import check_browser_only_request
 from agent.product import resolve_depth, resolve_stress
 from agent.target_verification import is_target_verified, is_operator_approved_proof
 from api._security import (
@@ -26,6 +27,7 @@ from api._security import (
     read_json_body,
     require_allowed_origin,
     require_scan_access,
+    require_operator_scan_access,
 )
 
 
@@ -111,13 +113,26 @@ class handler(BaseHTTPRequestHandler):
             self._json(400, {"ok": False, "error": str(exc)})
             return
         dry = bool(data.get("dry_run"))
-        try:
-            if not dry:
-                ensure_durable_store()
-        except RuntimeError:
-            return self._json(503, {"ok": False, "error": "persistent scan storage is not configured"})
-        if not dry and not require_scan_access(self, data.get("access_code")):
-            return
+        browser_only = data.get("browser_only") is True
+        if "browser_only" in data and not isinstance(data["browser_only"], bool):
+            return self._json(400, {"ok": False, "error": "browser_only must be a boolean"})
+        if browser_only:
+            denied = check_browser_only_request(
+                data, targets, ownership_proofs, depth=depth, stress_multiplier=stress_m,
+            )
+            if denied:
+                return self._json(403, {"ok": False, "error": denied})
+            # This option is strictly deployment-admin only, not invite-based.
+            if not require_operator_scan_access(self):
+                return
+        else:
+            try:
+                if not dry:
+                    ensure_durable_store()
+            except RuntimeError:
+                return self._json(503, {"ok": False, "error": "persistent scan storage is not configured"})
+            if not dry and not require_scan_access(self, data.get("access_code")):
+                return
         if not dry and (os.environ.get("VIBE_AGENT_REQUIRE_OWNERSHIP", "1").strip().lower() not in {"0", "false", "no"}):
             unverified = [
                 target for target in targets
@@ -163,11 +178,18 @@ class handler(BaseHTTPRequestHandler):
                 ownership_proofs=ownership_proofs,
                 provider_keys=provider_keys,
             )
-            try:
-                save_job(report)
-            except Exception:
-                send_event({"type": "final", "ok": False, "error": "report persistence failed", "job_id": report.get("job_id")})
-                return
+            if browser_only:
+                # Never write company evidence to cloud Redis or the Vercel
+                # filesystem. Browser receives the real live report and may
+                # explicitly download it locally.
+                report["browser_only"] = True
+                report["stored"] = False
+            else:
+                try:
+                    save_job(report)
+                except Exception:
+                    send_event({"type": "final", "ok": False, "error": "report persistence failed", "job_id": report.get("job_id")})
+                    return
             send_event({"type": "final", "ok": True, "job_id": report.get("job_id"), "report": report})
         except ScopeError as e:
             send_event({"type": "final", "ok": False, "error": str(e)})
