@@ -440,6 +440,12 @@
           }
           confirmedTargets.add(selectedTarget);
           sessionStorage.setItem("vibeagent_verified_targets", JSON.stringify([...confirmedTargets]));
+          if (action === "approve") {
+            document.getElementById("depth").value = "quick";
+            document.getElementById("stress").value = "";
+            document.getElementById("stress_org").checked = false;
+            updateStressState();
+          }
           verifyMessage.textContent = action === "approve"
             ? "Operator approval issued for this exact host (expires in one hour)."
             : "Ownership verified for " + selectedTarget + ".";
