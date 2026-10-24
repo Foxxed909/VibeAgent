@@ -137,11 +137,15 @@ def load_task(job_id: str) -> Optional[Dict[str, Any]]:
 
 def claim(worker_id: str, lease_seconds: int = 300) -> Optional[str]:
     require_queue()
-    job_id = job_store._kv_command("RPOPLPUSH", PENDING, PROCESSING)
-    if not job_id:
-        return None
-    lease = job_store._kv_command("SET", _key("lease", str(job_id)), worker_id, "NX", "EX", lease_seconds)
-    return str(job_id) if lease == "OK" else None
+    # Atomic move + claim prevents the reclaimer from observing an unleased job.
+    script = ("local id = redis.call('RPOPLPUSH', KEYS[1], KEYS[2]); "
+              "if not id then return nil end; "
+              "redis.call('SET', 'vibeagent:queue:lease:' .. id, ARGV[1], 'EX', ARGV[2]); "
+              "return id")
+    job_id = job_store._kv_command(
+        "EVAL", script, 2, PENDING, PROCESSING, worker_id, lease_seconds
+    )
+    return str(job_id) if job_id else None
 
 
 def heartbeat(job_id: str, worker_id: str, lease_seconds: int = 300) -> bool:
