@@ -68,15 +68,18 @@
       <button type="button" data-agent="break">BreakAgent · validate</button>
     </div>
     <p class="hint" id="agent-hint">VibeAgent maps the authorized surface and follows evidence autonomously.</p>
-    <div class="verify-box" style="display:block;background:rgba(34,197,94,.075);margin:16px 0 24px">
-      <strong>Just looking around? Try a sample scan.</strong>
+    <details style="margin:16px 0 24px;border:1px solid #333;border-radius:10px;padding:12px">
+      <summary style="cursor:pointer">Optional interface-only demo (fictional results)</summary>
+      <div style="padding:12px 0 0">
+      <strong>Preview the UI only</strong>
       <p class="hint" style="margin:8px 0 12px">No API key, invite, ownership challenge, target URL or payment needed. This demonstrates the interface using fictional results — it does not contact, scan, or assess a website.</p>
-      <button type="button" id="launch-demo" style="background:#22c55e;color:#071b10;border:0;border-radius:8px;padding:12px 20px;font-weight:800;width:100%;cursor:pointer">Try the selected agent · Demo</button>
-    </div>
+      <button type="button" id="launch-demo" style="background:#111;color:#d4d4d8;border:1px solid #444;border-radius:8px;padding:12px 20px;font-weight:700;width:100%;cursor:pointer">Open optional UI demo</button>
+      </div>
+    </details>
 
-    <details id="real-scan-details" style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--surface,#0c0c0c)">
-      <summary style="cursor:pointer;font-weight:700;padding:5px 0">Run a real scan instead (requires verification)</summary>
-      <p class="hint" style="margin:10px 0 18px">Real scans use approved targets, a scan access token or invite, provider credentials, and hostname verification. Open this section only when you're ready to assess a site you control.</p>
+    <details id="real-scan-details" open style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--surface,#0c0c0c)">
+      <summary style="cursor:pointer;font-weight:700;padding:5px 0">Real security assessment · authorized company host</summary>
+      <p class="hint" style="margin:10px 0 18px">Enter an exact authorized HTTPS hostname. Your private deployment can issue a one-hour operator approval without uploading a challenge file. The scanner performs real observations; unverifiable findings are reported as inconclusive.</p>
     <div class="tier-toggle">
       <button type="button" class="active" data-tier="hobby">Hobby</button>
       <button type="button" data-tier="enterprise">Enterprise</button>
@@ -168,7 +171,12 @@
         <input type="checkbox" id="queued_mode" checked />
         <span><strong>Durable worker mode</strong> — run asynchronously, resume progress and cancel. Requires an online worker and server-side model credentials; no BYOK keys/cookies stored.</span>
       </label>
-      <p class="hint" id="queued_hint">Queue mode excludes stress/load scans and sends no API keys or cookies to storage. Uncheck for the legacy one-request BYOK stream.</p>
+      <p class="hint" id="queued_hint">Queue mode excludes stress/load scans and sends no API keys or cookies to storage. Uncheck for a live one-request BYOK stream.</p>
+      <label class="check">
+        <input type="checkbox" id="browser_only" />
+        <span><strong>Real browser-only scan · private report</strong> — Run Quick checks on one operator-approved public HTTPS host without Redis. Results stream live and can be downloaded directly; no server-side job history. Requires a configured operator host allowlist and deployment-admin access token. No stress testing or cookies.</span>
+      </label>
+      <p class="hint">For VPN-only or RFC1918 internal hosts, a separately hosted worker inside the approved network is needed; Vercel itself cannot reach private infrastructure.</p>
 
       <label for="model">Investigation model</label>
       <select id="model" name="model">
@@ -218,8 +226,22 @@
     const entBtn = document.querySelector('[data-tier="enterprise"]');
     const backendSelect = document.getElementById("execution_backend");
     const queuedCheckbox = document.getElementById("queued_mode");
+    const browserOnlyCheckbox = document.getElementById("browser_only");
+    let operatorApprovedTargets = new Set();
     let queueAvailabilityInitialized = false;
     function syncQueueMode() {
+      if (browserOnlyCheckbox.checked) {
+        queuedCheckbox.checked = false;
+        queuedCheckbox.disabled = true;
+        backendSelect.value = "portable";
+        document.getElementById("depth").value = "quick";
+        document.getElementById("stress").value = "";
+        document.getElementById("stress_org").checked = false;
+        document.getElementById("cookie").value = "";
+      } else if (queueAvailabilityInitialized) {
+        // The availability refresh will also disable queue when no worker is online.
+        queuedCheckbox.disabled = !queuedCheckbox.dataset.workerOnline || queuedCheckbox.dataset.workerOnline !== "true";
+      }
       const model = document.getElementById("model").value;
       document.getElementById("openai_api_key").required = !queuedCheckbox.checked && !model.startsWith("nvidia/nemotron-3-ultra-550b-a55b");
       document.getElementById("openai_api_key").disabled = queuedCheckbox.checked;
@@ -231,6 +253,7 @@
       document.getElementById("stress_org").disabled = queuedCheckbox.checked || agentMode === "break" || backendSelect.value !== "portable";
     }
     queuedCheckbox.addEventListener("change", syncQueueMode);
+    browserOnlyCheckbox.addEventListener("change", () => { syncQueueMode(); updateStressState(); });
     document.getElementById("model").addEventListener("change", syncQueueMode);
     const workerToolsOption = document.getElementById("worker-tools-option");
     const backendHint = document.getElementById("backend-hint");
@@ -275,8 +298,9 @@
             const queueResponse = await fetch("/api/capabilities");
             const queueBody = await queueResponse.json();
             const online = Boolean(queueBody.queue && queueBody.queue.worker_online);
-            queuedCheckbox.checked = online;
-            queuedCheckbox.disabled = !online;
+            queuedCheckbox.dataset.workerOnline = String(online);
+            queuedCheckbox.checked = online && !browserOnlyCheckbox.checked;
+            queuedCheckbox.disabled = !online || browserOnlyCheckbox.checked;
             document.getElementById("queued_hint").textContent = online
               ? "Durable worker connected. Scans can resume after refresh."
               : "No durable worker online. Use the legacy single-request mode.";
@@ -303,11 +327,13 @@
         const queue = data.queue || {};
         const hint = document.getElementById("queued_hint");
         if (!queueAvailabilityInitialized) {
-          queuedCheckbox.checked = Boolean(queue.worker_online);
+          queuedCheckbox.dataset.workerOnline = String(Boolean(queue.worker_online));
+          queuedCheckbox.checked = Boolean(queue.worker_online) && !browserOnlyCheckbox.checked;
           queueAvailabilityInitialized = true;
           syncQueueMode();
         }
-        queuedCheckbox.disabled = !queue.worker_online;
+        queuedCheckbox.dataset.workerOnline = String(Boolean(queue.worker_online));
+        queuedCheckbox.disabled = !queue.worker_online || browserOnlyCheckbox.checked;
         hint.textContent = queue.worker_online
           ? "Worker connected. Queue mode uses worker environment credentials and supports resume/cancellation."
           : "Durable worker is not online. Legacy one-request BYOK scans remain available.";
@@ -441,9 +467,12 @@
           confirmedTargets.add(selectedTarget);
           sessionStorage.setItem("vibeagent_verified_targets", JSON.stringify([...confirmedTargets]));
           if (action === "approve") {
+            operatorApprovedTargets.add(selectedTarget);
+            browserOnlyCheckbox.checked = true;
             document.getElementById("depth").value = "quick";
             document.getElementById("stress").value = "";
             document.getElementById("stress_org").checked = false;
+            syncQueueMode();
             updateStressState();
           }
           verifyMessage.textContent = action === "approve"
@@ -518,10 +547,18 @@
           openrouter: document.getElementById("openrouter_api_key").value.trim(),
           nvidia: document.getElementById("nvidia_api_key").value.trim(),
         },
+        browser_only: browserOnlyCheckbox.checked,
         ownership_proofs: Object.fromEntries(
           targets.filter(target => ownershipProofs[target]).map(target => [target, ownershipProofs[target]])
         ),
       };
+      if (payload.browser_only) {
+        if (!scanApiToken || targets.length !== 1 || !ownershipProofs[targets[0]] ||
+            depth !== "quick" || executionBackend !== "portable" || payload.stress_multiplier || payload.cookie) {
+          err.textContent = "Browser-only real scans require one pre-approved HTTPS hostname, the operator token, Quick depth, portable mode, and no cookies/stress.";
+          err.hidden = false; return;
+        }
+      }
       if (!queuedCheckbox.checked && payload.model.startsWith("nvidia/nemotron-3-ultra-550b-a55b")) {
         const nvidiaDirect = !payload.model.endsWith(":free");
         if (nvidiaDirect && !payload.provider_keys.nvidia) {
