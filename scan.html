@@ -74,6 +74,9 @@
       <button type="button" id="launch-demo" style="background:#22c55e;color:#071b10;border:0;border-radius:8px;padding:12px 20px;font-weight:800;width:100%;cursor:pointer">Try the selected agent · Demo</button>
     </div>
 
+    <details id="real-scan-details" style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--surface,#0c0c0c)">
+      <summary style="cursor:pointer;font-weight:700;padding:5px 0">Run a real scan instead (requires verification)</summary>
+      <p class="hint" style="margin:10px 0 18px">Real scans use approved targets, a scan access token or invite, provider credentials, and hostname verification. Open this section only when you're ready to assess a site you control.</p>
     <div class="tier-toggle">
       <button type="button" class="active" data-tier="hobby">Hobby</button>
       <button type="button" data-tier="enterprise">Enterprise</button>
@@ -194,6 +197,7 @@
       <button type="submit" class="btn" id="submit">Launch agent (live)</button>
       <p class="success" id="success" hidden></p>
     </form>
+    </details>
   </div>
 
   <script>
