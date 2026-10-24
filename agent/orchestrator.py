@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import secrets
@@ -74,6 +75,7 @@ def run_job(
     cookie: Optional[str] = None,
     agent_mode: str = "vibe",
     execution_backend: str = "portable",
+    ownership_proofs: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     cookie_token = set_cookie(cookie)
     try:
@@ -89,6 +91,7 @@ def run_job(
             cookie=cookie,
             agent_mode=agent_mode,
             execution_backend=execution_backend,
+            ownership_proofs=ownership_proofs,
         )
     finally:
         reset_cookie(cookie_token)
@@ -107,6 +110,7 @@ def _run_job_impl(
     cookie: Optional[str] = None,
     agent_mode: str = "vibe",
     execution_backend: str = "portable",
+    ownership_proofs: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     auth = auth.validated()
     trial = is_valid_trial_code(auth.access_code)
@@ -122,9 +126,9 @@ def _run_job_impl(
         execution_backend = "portable"
 
     verified_targets = {
-        target: is_target_verified(target)
+        target: is_target_verified(target, (ownership_proofs or {}).get(target))
         for target in auth.targets
-    } if execution_backend in {"worker-tools", "native-worker"} else {}
+    }
 
     worker_tools = set()
     worker_warning = None
@@ -175,6 +179,14 @@ def _run_job_impl(
         "worker_warning": worker_warning,
         "ownership_verified": verified_targets,
         "native_worker": None,
+        "loop": {
+            "phase": "authorization",
+            "rounds_completed": 0,
+            "duplicate_calls_skipped": 0,
+            "retests": 0,
+            "stop_reason": None,
+        },
+        "review": None,
     }
 
     def emit(kind: str, **kwargs: Any) -> None:
@@ -199,6 +211,8 @@ def _run_job_impl(
             f"Depth: {profile.name} (max_rounds={profile.max_rounds})",
             f"Force api_finder={profile.force_api_finder}, follow_up={profile.follow_up_on_hits}",
             f"Retries={profile.tool_retries}, timeout={profile.tool_timeout_s}s",
+            f"Tool budget={profile.max_tool_calls}, retest budget={profile.max_retests}",
+            "Loop: baseline → investigate → reproduce → independent review → synthesize",
         ]
         if execution_backend == "native-worker":
             report["native_worker_capabilities"] = native_worker_capabilities(auth.targets, agent_mode=agent_mode)
@@ -219,7 +233,7 @@ def _run_job_impl(
         return report
 
     if execution_backend == "native-worker":
-        return _run_native_worker_job(auth, report, emit, agent_mode, active_agent)
+        return _run_native_worker_job(auth, report, emit, agent_mode, active_agent, ownership_proofs=ownership_proofs)
 
     if stress_multiplier:
         if execution_backend == "worker-tools":
@@ -268,6 +282,8 @@ def _run_job_impl(
         {"role": "user", "content": user_brief},
     ]
     emit("agent_message", text=f"{active_agent} starting {profile.name} assessment ({profile.max_rounds} max rounds).")
+    report["loop"]["phase"] = "baseline"
+    emit("phase", name="baseline")
 
     forced_tools = get_forced_tools(agent_mode, force_api_finder=profile.force_api_finder)
 
@@ -277,6 +293,8 @@ def _run_job_impl(
             args: Dict[str, Any] = {"url": base}
             if tname == "api_finder":
                 args["max_paths"] = profile.max_paths_per_tool
+            if len(report["tool_calls"]) >= profile.max_tool_calls:
+                break
             _run_one_tool(tname, args, auth, report, emit, profile, worker_tools=worker_tools)
             if tname == "api_finder" and profile.follow_up_on_hits:
                 last = report["tool_calls"][-1] if report["tool_calls"] else None
@@ -286,6 +304,8 @@ def _run_job_impl(
                         assert_url_in_scope(hit_url, auth)
                     except ScopeError:
                         continue
+                    if len(report["tool_calls"]) >= profile.max_tool_calls:
+                        break
                     _run_one_tool("vibe_headers", {"url": hit_url}, auth, report, emit, profile, worker_tools=worker_tools)
 
     tool_digest = []
@@ -301,10 +321,29 @@ def _run_job_impl(
         ),
     })
 
+    report["loop"]["phase"] = "investigate"
+    emit("phase", name="investigate")
+    executed = {
+        _tool_fingerprint(str(call.get("tool") or ""), call.get("args") or {})
+        for call in report["tool_calls"]
+    }
+    stagnant_rounds = 0
+
     for round_i in range(profile.max_rounds):
+        if len(report["tool_calls"]) >= profile.max_tool_calls:
+            report["loop"]["stop_reason"] = "tool_budget_reached"
+            break
         emit("round", index=round_i + 1, max=profile.max_rounds)
         try:
-            completion = chat(messages, model=model, tools=tool_catalog, max_tokens=4096)
+            completion = _chat_with_retry(
+                messages,
+                model=model,
+                tools=tool_catalog,
+                max_tokens=4096,
+                retries=profile.model_retries,
+                emit=emit,
+                purpose="investigation",
+            )
         except (OpenRouterError, OpenAIError) as e:
             report["errors"].append(str(e))
             emit("error", text=str(e))
@@ -338,8 +377,10 @@ def _run_job_impl(
             report["report_text"] = content
             emit("agent_message", text=content[:8000])
         if not tool_calls:
+            report["loop"]["stop_reason"] = "model_finished"
             break
 
+        calls_executed_this_round = 0
         for tc in tool_calls:
             if not isinstance(tc, dict):
                 report["errors"].append("Model returned an invalid tool call object.")
@@ -365,7 +406,19 @@ def _run_job_impl(
                     raise ScopeError(f"Tool is not available to {active_agent}: {name!r}")
                 if url:
                     assert_url_in_scope(url, auth)
+                fingerprint = _tool_fingerprint(name, args)
+                if fingerprint in executed:
+                    report["loop"]["duplicate_calls_skipped"] += 1
+                    emit("tool_result", tool=name, ok=True, skipped=True, preview="Skipped exact duplicate probe.")
+                    messages.append({"role": "tool", "tool_call_id": tc_id, "content": "SKIPPED: exact duplicate probe; choose a new evidence-producing action."})
+                    continue
+                if len(report["tool_calls"]) >= profile.max_tool_calls:
+                    messages.append({"role": "tool", "tool_call_id": tc_id, "content": "SKIPPED: tool-call budget reached; synthesize from existing evidence."})
+                    report["loop"]["stop_reason"] = "tool_budget_reached"
+                    continue
                 result = _dispatch_tool(name, args, auth, profile, worker_tools=worker_tools)
+                executed.add(fingerprint)
+                calls_executed_this_round += 1
                 report["tool_calls"].append({"tool": name, "args": args, "result": result})
                 out = result.get("stdout") or result.get("message") or json.dumps(result)[:3000]
                 emit(
@@ -388,18 +441,93 @@ def _run_job_impl(
                 emit("tool_result", tool=name, ok=False, preview=str(e))
                 messages.append({"role": "tool", "tool_call_id": tc_id, "content": f"ERROR: {e}"})
 
-    if profile.require_final_report and (
-        not report.get("report_text") or "## Findings" not in (report.get("report_text") or "")
-    ):
+        report["loop"]["rounds_completed"] = round_i + 1
+        if calls_executed_this_round:
+            stagnant_rounds = 0
+        else:
+            stagnant_rounds += 1
+            if stagnant_rounds >= profile.stagnant_round_limit:
+                report["loop"]["stop_reason"] = "no_new_evidence"
+                break
+
+    report["loop"]["phase"] = "reproduce"
+    emit("phase", name="reproduce")
+    _retest_findings(auth, report, emit, profile, worker_tools=worker_tools)
+
+    review_model = (os.environ.get("VIBE_AGENT_REVIEW_MODEL") or "").strip()
+    if review_model:
+        report["loop"]["phase"] = "independent_review"
+        emit("phase", name="independent_review", model=review_model)
+        try:
+            validate_requested_model(review_model)
+            review_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an independent defensive-security evidence reviewer. "
+                        "Do not propose bypasses or new attack actions. Identify false positives, "
+                        "missing evidence, severity mistakes, and the three highest-value safe follow-ups."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "targets": auth.targets,
+                        "findings": report.get("findings") or [],
+                        "errors": report.get("errors") or [],
+                        "tool_count": len(report.get("tool_calls") or []),
+                    })[:24000],
+                },
+            ]
+            review_completion = _chat_with_retry(
+                review_messages,
+                model=review_model,
+                tools=None,
+                max_tokens=1800,
+                retries=profile.model_retries,
+                emit=emit,
+                purpose="independent review",
+            )
+            review_choice = (review_completion.get("choices") or [{}])[0]
+            review_text = str((review_choice.get("message") or {}).get("content") or "").strip()
+            review_meta = review_completion.get("_vibeagent") or {}
+            if review_text:
+                report["review"] = {
+                    "model": review_meta.get("model") or review_model,
+                    "provider": review_meta.get("provider"),
+                    "text": review_text,
+                }
+                messages.append({
+                    "role": "user",
+                    "content": "Independent reviewer notes (advisory; preserve only claims supported by tool evidence):\n\n" + review_text[:8000],
+                })
+                emit("review", model=report["review"]["model"], text=review_text[:4000])
+        except Exception as exc:
+            report["errors"].append(f"Independent review unavailable: {exc}")
+            emit("error", text="Independent review unavailable; continuing with collected evidence.")
+
+    if profile.require_final_report:
         messages.append({
             "role": "user",
             "content": (
                 f"Write the final {active_agent} report with a ## Findings section. "
-                "Severity, evidence, URL, fix hints. Challenges are informational."
+                "Use only collected tool evidence, incorporate reproduced/unconfirmed status and reviewer corrections, "
+                "deduplicate claims, and include severity, evidence, URL and fix guidance. "
+                "Challenges are informational and authorization is context, not evidence."
             ),
         })
         try:
-            completion = chat(messages, model=model, tools=None, max_tokens=3072)
+            report["loop"]["phase"] = "synthesize"
+            emit("phase", name="synthesize")
+            completion = _chat_with_retry(
+                messages,
+                model=model,
+                tools=None,
+                max_tokens=3072,
+                retries=profile.model_retries,
+                emit=emit,
+                purpose="synthesis",
+            )
             meta = completion.get("_vibeagent") or {}
             if meta.get("model"):
                 report["model"] = report.get("model") or meta.get("model")
@@ -414,6 +542,8 @@ def _run_job_impl(
             emit("agent_message", text=report["report_text"])
 
     report["status"] = "completed"
+    report["loop"]["phase"] = "completed"
+    report["loop"]["stop_reason"] = report["loop"].get("stop_reason") or "completed"
     report["summary"] = {
         "total_findings": len(report["findings"]),
         "severity": severity_counts(report),
@@ -421,6 +551,94 @@ def _run_job_impl(
     }
     emit("done", status="completed", findings=len(report["findings"]), summary=report["summary"])
     return report
+
+
+def _tool_fingerprint(name: str, args: Dict[str, Any]) -> str:
+    canonical = json.dumps(args, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(f"{name}|{canonical}".encode("utf-8")).hexdigest()
+
+
+def _chat_with_retry(
+    messages: List[Dict[str, Any]],
+    *,
+    model: Optional[str],
+    tools: Optional[List[Dict[str, Any]]],
+    max_tokens: int,
+    retries: int,
+    emit,
+    purpose: str,
+) -> Dict[str, Any]:
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max(1, retries) + 1):
+        try:
+            return chat(messages, model=model, tools=tools, max_tokens=max_tokens)
+        except (OpenRouterError, OpenAIError) as exc:
+            last_error = exc
+            if attempt >= max(1, retries):
+                raise
+            delay = min(2.0, 0.35 * (2 ** (attempt - 1)))
+            emit("model_retry", purpose=purpose, attempt=attempt, delay_s=delay)
+            time.sleep(delay)
+    assert last_error is not None
+    raise last_error
+
+
+def _retest_findings(
+    auth: Authorization,
+    report: Dict[str, Any],
+    emit,
+    profile: DepthProfile,
+    *,
+    worker_tools=None,
+) -> None:
+    candidates = []
+    for finding in report.get("findings") or []:
+        severity = str(finding.get("severity") or "info").lower()
+        status = str(finding.get("validation_status") or "").lower()
+        tool = str(finding.get("tool") or "")
+        url = str(finding.get("location") or "")
+        if severity not in {"critical", "high", "medium"}:
+            continue
+        if status not in {"observed", "unconfirmed"}:
+            continue
+        if tool not in KNOWN_TOOL_NAMES or not url:
+            continue
+        candidates.append(finding)
+
+    for finding in candidates[:profile.max_retests]:
+        if len(report.get("tool_calls") or []) >= profile.max_tool_calls:
+            report["loop"]["stop_reason"] = "tool_budget_reached"
+            return
+        try:
+            assert_url_in_scope(str(finding["location"]), auth)
+        except ScopeError:
+            continue
+        before = len(report["tool_calls"])
+        _run_one_tool(
+            str(finding["tool"]),
+            {"url": str(finding["location"])},
+            auth,
+            report,
+            emit,
+            profile,
+            worker_tools=worker_tools,
+        )
+        report["loop"]["retests"] += 1
+        if len(report["tool_calls"]) <= before:
+            continue
+        result = report["tool_calls"][-1].get("result") or {}
+        output = str(result.get("stdout") or result.get("message") or "")
+        evidence = str(finding.get("evidence") or "").strip()
+        if evidence and evidence in output:
+            finding["validation_status"] = "reproduced"
+            finding["retested"] = True
+            emit(
+                "finding_validated",
+                id=finding.get("id"),
+                validation_status="reproduced",
+                tool=finding.get("tool"),
+                location=finding.get("location"),
+            )
 
 
 def _emit_structured_finding(report: Dict[str, Any], emit, finding: Dict[str, Any]) -> None:
@@ -448,12 +666,14 @@ def _run_native_worker_job(
     emit,
     agent_mode: str,
     active_agent: str,
+    *,
+    ownership_proofs: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     if len(auth.targets) != 1:
         raise WorkerError("native-worker backend currently requires exactly one target per job")
 
     target = auth.targets[0]
-    if not is_target_verified(target):
+    if not is_target_verified(target, (ownership_proofs or {}).get(target)):
         raise WorkerError(
             "native-worker target ownership is not verified; complete the /.well-known/vibeagent-verification.txt challenge first"
         )

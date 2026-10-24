@@ -10,7 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from agent.scope import Authorization, ScopeError
+from agent.scope import Authorization, ScopeError, normalize_target
 from agent.models import OpenRouterError, validate_requested_model
 from agent.orchestrator import run_job
 from agent.job_store import save_job, backend_name
@@ -45,6 +45,17 @@ class handler(BaseHTTPRequestHandler):
             targets = [t.strip() for t in targets.splitlines() if t.strip()]
         if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
             return self._json(400, {"ok": False, "error": "targets must be a string or list of strings"})
+        ownership_proofs = data.get("ownership_proofs") or {}
+        if not isinstance(ownership_proofs, dict) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in ownership_proofs.items()
+        ):
+            return self._json(400, {"ok": False, "error": "ownership_proofs must be a string map"})
+        ownership_proofs = {
+            normalize_target(key): value
+            for key, value in ownership_proofs.items()
+            if normalize_target(key)
+        }
 
         auth = Authorization(
             tier=(data.get("tier") or "hobby").lower(),
@@ -74,7 +85,10 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             if not dry and (os.environ.get("VIBE_AGENT_REQUIRE_OWNERSHIP", "1").strip().lower() not in {"0", "false", "no"}):
-                unverified = [target for target in targets if not is_target_verified(target)]
+                unverified = [
+                    target for target in targets
+                    if not is_target_verified(target, ownership_proofs.get(normalize_target(target)))
+                ]
                 if unverified:
                     raise ScopeError("Target ownership verification is required before a live scan.")
             report = run_job(
@@ -87,6 +101,7 @@ class handler(BaseHTTPRequestHandler):
                 cookie=cookie,
                 agent_mode=agent_mode,
                 execution_backend=execution_backend,
+                ownership_proofs=ownership_proofs,
             )
             try:
                 save_job(report)

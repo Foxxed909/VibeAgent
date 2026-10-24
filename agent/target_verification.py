@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import base64
 import json
 import os
 import secrets
@@ -20,10 +21,67 @@ STATE_DIR = Path(os.environ.get("VIBE_AGENT_VERIFY_DIR", "/tmp/vibeagent_verify"
 CHALLENGE_TTL = int(os.environ.get("VIBE_AGENT_VERIFY_CHALLENGE_TTL", "900"))
 VERIFIED_TTL = int(os.environ.get("VIBE_AGENT_VERIFIED_TTL", "604800"))
 VERIFY_PATH = "/.well-known/vibeagent-verification.txt"
+STATELESS_PREFIX = "vibeagent-v1"
 
 
 class VerificationError(RuntimeError):
     pass
+
+
+def _verification_secret() -> bytes:
+    value = (os.environ.get("VIBE_AGENT_VERIFICATION_SECRET") or "").strip()
+    return value.encode("utf-8")
+
+
+def _b64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def _signed_token(kind: str, host: str, ttl: int) -> str:
+    secret = _verification_secret()
+    if len(secret) < 32:
+        raise VerificationError("VIBE_AGENT_VERIFICATION_SECRET must contain at least 32 characters")
+    payload = json.dumps(
+        {
+            "v": 1,
+            "kind": kind,
+            "host": host,
+            "exp": int(time.time()) + ttl,
+            "nonce": secrets.token_urlsafe(12),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    encoded = _b64url_encode(payload)
+    signature = hmac.new(secret, encoded.encode("ascii"), hashlib.sha256).digest()
+    return f"{STATELESS_PREFIX}.{encoded}.{_b64url_encode(signature)}"
+
+
+def _verify_signed_token(token: str, *, kind: str, host: str) -> bool:
+    secret = _verification_secret()
+    if len(secret) < 32:
+        return False
+    parts = (token or "").strip().split(".")
+    if len(parts) != 3 or parts[0] != STATELESS_PREFIX:
+        return False
+    try:
+        expected = hmac.new(secret, parts[1].encode("ascii"), hashlib.sha256).digest()
+        supplied = _b64url_decode(parts[2])
+        if not hmac.compare_digest(supplied, expected):
+            return False
+        payload = json.loads(_b64url_decode(parts[1]).decode("utf-8"))
+        return bool(
+            payload.get("v") == 1
+            and payload.get("kind") == kind
+            and payload.get("host") == host
+            and int(payload.get("exp") or 0) >= int(time.time())
+        )
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
 
 
 def _kv_enabled() -> bool:
@@ -90,6 +148,16 @@ def _exact_https_target(target: str) -> tuple[str, str]:
 
 def create_challenge(target: str) -> Dict[str, Any]:
     host, origin = _exact_https_target(target)
+    if _verification_secret():
+        token = _signed_token("challenge", host, CHALLENGE_TTL)
+        return {
+            "host": host,
+            "token": token,
+            "path": VERIFY_PATH,
+            "verification_url": origin + VERIFY_PATH,
+            "expires_in": CHALLENGE_TTL,
+            "mode": "stateless",
+        }
     token = "vibeagent-" + secrets.token_urlsafe(24)
     record = {"host": host, "token": token, "created_at": int(time.time())}
     _write_state(_host_key("verify-challenge", host), record, CHALLENGE_TTL)
@@ -120,6 +188,17 @@ def _fetch_verification(url: str) -> str:
 
 def confirm_challenge(target: str) -> Dict[str, Any]:
     host, origin = _exact_https_target(target)
+    if _verification_secret():
+        actual = _fetch_verification(origin + VERIFY_PATH)
+        if not _verify_signed_token(actual, kind="challenge", host=host):
+            raise VerificationError("verification token did not match, expired, or was issued for another host")
+        return {
+            "host": host,
+            "verified": True,
+            "expires_in": VERIFIED_TTL,
+            "proof": _signed_token("proof", host, VERIFIED_TTL),
+            "mode": "stateless",
+        }
     record = _read_state(_host_key("verify-challenge", host))
     if not record:
         raise VerificationError("no active verification challenge for this host")
@@ -132,10 +211,12 @@ def confirm_challenge(target: str) -> Dict[str, Any]:
     return {"host": host, "verified": True, "expires_in": VERIFIED_TTL}
 
 
-def is_target_verified(target: str) -> bool:
+def is_target_verified(target: str, proof: Optional[str] = None) -> bool:
     try:
         host, _ = _exact_https_target(target)
     except VerificationError:
         return False
+    if proof and _verify_signed_token(proof, kind="proof", host=host):
+        return True
     record = _read_state(_host_key("verified-host", host))
     return bool(record and record.get("host") == host)

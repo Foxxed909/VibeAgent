@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -12,7 +13,7 @@ from unittest.mock import patch
 from agent.orchestrator import run_job
 from agent import orchestrator
 from agent.net_safety import NetworkSafetyError, request_url, validate_outbound_url
-from agent.models import OpenRouterError, validate_requested_model
+from agent.models import OpenRouterError, chat as model_chat, validate_requested_model
 from agent.request_context import current_cookie, reset_cookie, set_cookie
 from agent.scope import Authorization, CONFIRM_PHRASE, ScopeError, host_in_scope, is_valid_trial_code
 from agent import target_verification
@@ -259,6 +260,39 @@ class ModelPolicyTests(unittest.TestCase):
         with patch.dict(os.environ, {"VIBE_AGENT_ALLOWED_MODELS": "approved/model"}, clear=True):
             self.assertEqual("approved/model", validate_requested_model("approved/model"))
 
+    def test_gateway_routes_exact_google_model_with_oidc(self):
+        captured = {}
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, _limit):
+                return b'{"choices":[{"message":{"content":"reviewed"}}],"model":"google/gemini-3-flash"}'
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["authorization"] = request.headers.get("Authorization")
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return Response()
+
+        env = {
+            "VERCEL_OIDC_TOKEN": "oidc-token",
+            "VIBE_AGENT_ALLOWED_MODELS": "google/gemini-3-flash",
+        }
+        with patch.dict(os.environ, env, clear=True), patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            result = model_chat(
+                [{"role": "user", "content": "review"}],
+                model="google/gemini-3-flash",
+            )
+        self.assertEqual("https://ai-gateway.vercel.sh/v1/chat/completions", captured["url"])
+        self.assertEqual("Bearer oidc-token", captured["authorization"])
+        self.assertEqual("google/gemini-3-flash", captured["body"]["model"])
+        self.assertEqual("vercel-ai-gateway", result["_vibeagent"]["provider"])
+
 
 class RequestContextTests(unittest.TestCase):
     def test_cookie_context_resets(self):
@@ -355,6 +389,25 @@ class OwnershipVerificationTests(unittest.TestCase):
     def test_verification_rejects_non_https_target(self):
         with self.assertRaises(target_verification.VerificationError):
             target_verification.create_challenge("http://other.example.com")
+
+    def test_stateless_challenge_issues_host_bound_proof(self):
+        env = {"VIBE_AGENT_VERIFICATION_SECRET": "s" * 48}
+        with patch.dict(os.environ, env, clear=True):
+            challenge = target_verification.create_challenge("https://app.example.com")
+            self.assertEqual("stateless", challenge["mode"])
+            with patch.object(target_verification, "_fetch_verification", return_value=challenge["token"]):
+                confirmed = target_verification.confirm_challenge("https://app.example.com")
+            self.assertTrue(target_verification.is_target_verified("https://app.example.com", confirmed["proof"]))
+            self.assertFalse(target_verification.is_target_verified("https://other.example.com", confirmed["proof"]))
+
+    def test_stateless_challenge_rejects_tampering(self):
+        env = {"VIBE_AGENT_VERIFICATION_SECRET": "s" * 48}
+        with patch.dict(os.environ, env, clear=True):
+            challenge = target_verification.create_challenge("https://app.example.com")
+            tampered = challenge["token"][:-1] + ("A" if challenge["token"][-1] != "A" else "B")
+            with patch.object(target_verification, "_fetch_verification", return_value=tampered):
+                with self.assertRaises(target_verification.VerificationError):
+                    target_verification.confirm_challenge("https://app.example.com")
 
 
 class DeploymentHeaderTests(unittest.TestCase):

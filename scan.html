@@ -173,6 +173,10 @@
     const verifyToken = document.getElementById("verify-token");
     let capabilityTimer = null;
     let targetVerified = false;
+    let ownershipProofs = (() => {
+      try { return JSON.parse(sessionStorage.getItem("vibeagent_ownership_proofs") || "{}"); }
+      catch { return {}; }
+    })();
 
     function updateStressState() {
       const stress = document.getElementById("stress");
@@ -200,9 +204,11 @@
         return;
       }
       try {
+        const proof = ownershipProofs[targets[0]] || "";
         const res = await fetch(
           "/api/capabilities?target=" + encodeURIComponent(targets[0]) +
-          "&agent=" + encodeURIComponent(agentMode)
+          "&agent=" + encodeURIComponent(agentMode),
+          { headers: proof ? { "X-VibeAgent-Verification": proof } : {} }
         );
         const data = await res.json();
         const worker = data.worker_tools || {};
@@ -305,6 +311,10 @@
           verifyChallenge.style.display = "block";
           verifyMessage.textContent = "Challenge created. Publish the token, then tap Confirm verification.";
         } else {
+          if (data.proof) {
+            ownershipProofs[targets[0]] = data.proof;
+            sessionStorage.setItem("vibeagent_ownership_proofs", JSON.stringify(ownershipProofs));
+          }
           verifyMessage.textContent = "Ownership verified. Live scans are now available for this host.";
           verifyChallenge.style.display = "none";
           await refreshWorkerAvailability();
@@ -366,6 +376,9 @@
         stress_multiplier: executionBackend === "portable" && stressVal ? parseInt(stressVal, 10) : null,
         stress_mode: stressOrg ? "org" : "capped",
         cookie: document.getElementById("cookie").value.trim() || null,
+        ownership_proofs: Object.fromEntries(
+          targets.filter(target => ownershipProofs[target]).map(target => [target, ownershipProofs[target]])
+        ),
       };
       if (payload.stress_multiplier && !(hasInvite || effectiveTier === "enterprise")) {
         err.textContent = "Stress requires Enterprise or a valid private invite."; err.hidden = false; return;

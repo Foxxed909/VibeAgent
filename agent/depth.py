@@ -15,6 +15,10 @@ class DepthProfile:
     follow_up_on_hits: bool
     require_final_report: bool
     max_paths_per_tool: int
+    max_tool_calls: int
+    max_retests: int
+    stagnant_round_limit: int
+    model_retries: int
 
 
 DEPTHS: Dict[str, DepthProfile] = {
@@ -27,6 +31,10 @@ DEPTHS: Dict[str, DepthProfile] = {
         follow_up_on_hits=False,
         require_final_report=True,
         max_paths_per_tool=12,
+        max_tool_calls=18,
+        max_retests=2,
+        stagnant_round_limit=1,
+        model_retries=1,
     ),
     "standard": DepthProfile(
         name="standard",
@@ -37,6 +45,10 @@ DEPTHS: Dict[str, DepthProfile] = {
         follow_up_on_hits=True,
         require_final_report=True,
         max_paths_per_tool=30,
+        max_tool_calls=42,
+        max_retests=5,
+        stagnant_round_limit=2,
+        model_retries=2,
     ),
     "deep": DepthProfile(
         name="deep",
@@ -47,6 +59,10 @@ DEPTHS: Dict[str, DepthProfile] = {
         follow_up_on_hits=True,
         require_final_report=True,
         max_paths_per_tool=50,
+        max_tool_calls=70,
+        max_retests=8,
+        stagnant_round_limit=3,
+        model_retries=3,
     ),
 }
 

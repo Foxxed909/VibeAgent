@@ -31,7 +31,8 @@ class handler(BaseHTTPRequestHandler):
             "remote_tools": [],
             "message": "Enter one exact target to check the VibeHacking worker.",
         }
-        verified = bool(target and is_target_verified(target))
+        proof = (self.headers.get("X-VibeAgent-Verification") or "").strip()
+        verified = bool(target and is_target_verified(target, proof))
 
         # Do not expose the configured allowlist itself to public clients.
         native = {

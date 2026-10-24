@@ -112,7 +112,10 @@ def apply_cors(handler) -> None:
         handler.send_header("Access-Control-Allow-Origin", origin)
         handler.send_header("Vary", "Origin")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    handler.send_header(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, X-VibeAgent-Token, X-VibeAgent-Workspace-Token, X-VibeAgent-Verification",
+    )
 
 
 def require_allowed_origin(handler) -> bool:
