@@ -74,6 +74,16 @@ class BrowserContractTests(unittest.TestCase):
                         thread.index("let requestBody = JSON.stringify(payload);"))
         self.assertIn("'X-VibeAgent-Token': scanApiToken", thread)
 
+    def test_owner_verification_sends_scan_access_token(self):
+        scan = (ROOT / "scan.html").read_text(encoding="utf-8")
+        verification_start = scan.index("async function verificationRequest(action)")
+        verification_end = scan.index('document.getElementById("create-verify").onclick', verification_start)
+        verification = scan[verification_start:verification_end]
+        self.assertIn('document.getElementById("scan_api_token").value.trim()', verification)
+        self.assertIn('"X-VibeAgent-Token": scanApiToken', verification)
+        self.assertIn('access_code: document.getElementById("access_code").value.trim()', verification)
+        self.assertIn("Add your self-hosted scan API token or private invite", verification)
+
     def test_browser_inline_scripts_have_valid_javascript(self):
         if not shutil.which("node"):
             self.skipTest("Node.js unavailable")
