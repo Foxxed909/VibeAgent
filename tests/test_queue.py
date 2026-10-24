@@ -28,6 +28,8 @@ class FakeRedis:
             return "OK"
         if cmd == "GET":
             return self.values.get(args[1])
+        if cmd == "EXPIRE":
+            return 1
         if cmd == "DEL":
             self.values.pop(args[1], None)
             return 1
