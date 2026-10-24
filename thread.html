@@ -71,6 +71,7 @@
     <span class="badge model" id="model-badge" hidden></span>
     <span class="badge model" id="finding-badge" hidden></span>
     <span class="header-spacer"></span>
+    <button class="report-link" type="button" id="cancel-job" hidden>Cancel scan</button>
     <span class="report-links" id="report-links" hidden>
       <a class="report-link" id="json-report" href="#">JSON</a>
       <a class="report-link" id="sarif-report" href="#">SARIF</a>
@@ -83,6 +84,7 @@
     const params = new URLSearchParams(location.search);
     const jobId = params.get('job') || params.get('id') || '';
     const live = params.get('live') === '1';
+    const queued = params.get('queued') === '1';
     const chat = document.getElementById('chat');
     const empty = document.getElementById('empty');
     const statusEl = document.getElementById('status');
@@ -90,6 +92,7 @@
     const modelBadge = document.getElementById('model-badge');
     const findingBadge = document.getElementById('finding-badge');
     const reportLinks = document.getElementById('report-links');
+    const cancelBtn = document.getElementById('cancel-job');
     const jsonReport = document.getElementById('json-report');
     const sarifReport = document.getElementById('sarif-report');
     document.getElementById('job-label').textContent = jobId ? 'job ' + jobId : (live ? 'live scan' : 'session');
@@ -224,6 +227,73 @@
       if (report.report_text) row('agent', currentAgent + ' · final report', report.report_text);
     }
 
+
+    async function startQueue() {
+      const token = sessionStorage.getItem('vibeagent_cancel_' + jobId);
+      cancelBtn.hidden = !token;
+      cancelBtn.onclick = async () => {
+        if (!token || !confirm('Cancel this assessment at its next safe checkpoint?')) return;
+        cancelBtn.disabled = true;
+        try {
+          const response = await fetch('/api/queue', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: 'cancel', job_id: jobId, cancel_token: token})
+          });
+          const body = await response.json();
+          row('system', '', body.ok ? 'Cancellation requested.' : (body.error || 'Could not cancel this job.'));
+        } catch {
+          row('finding', 'error', 'Cancellation request could not reach the server.');
+          cancelBtn.disabled = false;
+        }
+      };
+      statusEl.textContent = 'queued';
+      statusEl.className = 'badge running';
+      row('system', '', 'Reading durable worker events. This page can be reloaded or bookmarked.');
+      let after = '0-0';
+      let failures = 0;
+      const terminalStatuses = new Set(['completed', 'partial', 'failed', 'cancelled', 'dry_run_ok']);
+      while (true) {
+        try {
+          const response = await fetch('/api/events?id=' + encodeURIComponent(jobId) + '&after=' + encodeURIComponent(after), {cache: 'no-store'});
+          if (!response.ok) throw new Error('Progress endpoint HTTP ' + response.status);
+          const data = await response.json();
+          if (!data.ok) throw new Error(data.error || 'Progress is unavailable');
+          failures = 0;
+          after = data.next_cursor || after;
+          for (const event of data.events || []) {
+            if (event.type === 'queued' || event.type === 'started' || event.type === 'notice') {
+              row('system', '', event.text || event.type);
+            } else if (event.type !== 'final') {
+              handleEvent(event);
+            }
+          }
+          if (terminalStatuses.has(data.status)) {
+            const finalResponse = await fetch('/api/job?id=' + encodeURIComponent(jobId), {cache: 'no-store'});
+            const finalData = await finalResponse.json();
+            if (finalData.ok && finalData.report) {
+              const report = finalData.report;
+              renderReport({...report, events: []});
+              sessionStorage.setItem('vibeagent_last_report', JSON.stringify(report));
+            } else {
+              statusEl.textContent = 'report unavailable';
+              statusEl.className = 'badge error';
+            }
+            cancelBtn.hidden = true;
+            return;
+          }
+          statusEl.textContent = data.status || 'running';
+          statusEl.className = 'badge running';
+        } catch (error) {
+          failures += 1;
+          if (failures === 1) row('finding', 'error', 'Connection interrupted; retrying: ' + error);
+          statusEl.textContent = 'reconnecting';
+          statusEl.className = 'badge error';
+        }
+        await new Promise(resolve => setTimeout(resolve, Math.min(2000 * Math.max(1, failures), 10000)));
+      }
+    }
+
     async function startLive() {
       const raw = sessionStorage.getItem('vibeagent_pending_scan');
       sessionStorage.removeItem('vibeagent_pending_scan');
@@ -337,6 +407,7 @@
     }
 
     if (live) startLive();
+    else if (queued && jobId) startQueue();
     else loadExisting();
   </script>
 </body>
