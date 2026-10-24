@@ -61,7 +61,7 @@ footer{margin-top:45px;padding:22px 0;border-top:1px solid var(--stroke);font-si
  <ol>
   <li>Choose a Vercel team/project <strong>you control</strong>. Vercel will clone the public repository into your Git account.</li>
   <li>Enter the API key for your selected AI provider and the two Upstash credentials, plus the three secrets you generated.</li>
-  <li>Deploy, then use the protected <code>/api/setup</code> endpoint to check readiness (authenticate using your workspace token). You must redeploy after adding or changing variables.</li>
+  <li>Deploy, then check <code>/api</code> for basic health and <code>/api/capabilities</code> for worker availability. These checks do not validate provider keys or storage. You must redeploy after adding or changing environment variables.</li>
   <li>For scans, verify your exact target hostname and supply your own scan authorization token. Do not scan sites you do not own or have permission to assess.</li>
  </ol>
  <p class="notice"><strong>Privacy boundary:</strong> This self-deployment does not grant access to the original creator's Vercel team, deployments, environment variables or database. Nor can a copy read your other Vercel projects automatically. Vercel API access would require a separate, explicit, narrowly scoped authorization; this template does not request it.</p>
