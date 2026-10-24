@@ -68,6 +68,7 @@ def execute(job_id: str, worker_id: str) -> None:
         )
         if lease_lost.is_set():
             raise RuntimeError("worker lost queue lease during assessment")
+        report["queue_mode"] = True
         report["started_at"] = old["started_at"]
         report["finished_at"] = time.time()
         if not queue_store.save_report_if_owned(job_id, worker_id, report):
