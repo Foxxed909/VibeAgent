@@ -54,6 +54,7 @@ def execute(job_id: str, worker_id: str) -> None:
                 lease_lost.set()
                 return
 
+    queue_store.touch_worker(worker_id)
     heart = threading.Thread(target=pulse, daemon=True)
     heart.start()
     try:
