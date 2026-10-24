@@ -111,7 +111,29 @@ VIBE_AGENT_REVIEW_MODEL=google/gemini-3-flash
 VIBE_AGENT_ALLOWED_MODELS=gpt-6-luna,google/gemini-3-flash
 ```
 
-Hosted ChatGPT-plan usage requires OpenAI's approved Sign in with ChatGPT partner path. This remote Vercel app therefore uses supported API/Gateway credentials unless that approval is obtained. Google consumer subscriptions likewise are not stored or scraped; Google models are reached through AI Gateway or a supported provider API.
+The local CLI also supports OpenAI's documented open-source Sign in with ChatGPT flow. It uses the public Responses API with the signed-in user's own consent and stores its rotating OAuth credentials only on that device. This local flow is not used by Vercel. The remotely hosted Vercel app still uses user-supplied API keys or Gateway credentials unless OpenAI approves the commercial partner integration. Google consumer subscriptions likewise are not stored or scraped; Google models are reached through AI Gateway or a supported provider API.
+
+### ChatGPT plan usage in the local CLI
+
+Sign in on the device that will run VibeAgent:
+
+```bash
+python -m agent.cli auth login
+python -m agent.cli auth models
+```
+
+Then choose an account-available model and run the local agent:
+
+```bash
+python -m agent.cli --chatgpt-plan \
+  --model gpt-6-luna \
+  --tier hobby \
+  --target https://my-app.vercel.app \
+  --app-name MyApp \
+  --confirm 'I OWN OR AM AUTHORIZED TO TEST THESE TARGETS'
+```
+
+The sign-in callback binds to `127.0.0.1`. Credentials are kept in `~/.config/vibeagent/chatgpt_auth.json` with owner-only file permissions; `VIBEAGENT_CHATGPT_AUTH_FILE` can select another local path. Use `python -m agent.cli auth logout` to remove them. This feature is local CLI only; it does not enable subscription access on the hosted site.
 
 ### API origin boundary
 

@@ -4,14 +4,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from .job_store import save_job
 from .orchestrator import run_job
 from .product import resolve_depth, resolve_stress
 from .scope import Authorization, CONFIRM_PHRASE
+from .chatgpt_auth import (
+    ChatGPTAuthError,
+    auth_command_main,
+    local_chatgpt_plan_session,
+)
 
 
 def main(argv=None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "auth":
+        return auth_command_main(argv[1:])
     parser = argparse.ArgumentParser(description="VibeAgent / BreakAgent authorized security assessment runner")
     parser.add_argument("--agent", choices=["vibe", "break"], default="vibe", help="Agent mode")
     parser.add_argument("--backend", choices=["portable", "worker-tools", "native-worker"], default="portable", help="Execution backend")
@@ -24,6 +34,7 @@ def main(argv=None) -> int:
     parser.add_argument("--emergency-contact")
     parser.add_argument("--access-code")
     parser.add_argument("--model")
+    parser.add_argument("--chatgpt-plan", action="store_true", help="Use the signed-in ChatGPT plan in the local CLI")
     parser.add_argument("--depth", choices=["quick", "standard", "deep"], default="standard")
     parser.add_argument("--stress", type=int)
     parser.add_argument("--stress-mode", choices=["capped", "org"], default="capped")
@@ -45,17 +56,25 @@ def main(argv=None) -> int:
     depth = resolve_depth(args.tier, args.depth, args.access_code)
     stress_m, stress_mode = resolve_stress(args.tier, args.access_code, args.stress, args.stress_mode)
 
-    report = run_job(
-        auth,
-        dry_run=args.dry_run,
-        model=args.model,
-        depth=depth,
-        stress_multiplier=stress_m,
-        stress_mode=stress_mode,
-        cookie=args.cookie,
-        agent_mode=args.agent,
-        execution_backend=args.backend,
-    )
+    run_options = {
+        "dry_run": args.dry_run,
+        "model": args.model,
+        "depth": depth,
+        "stress_multiplier": stress_m,
+        "stress_mode": stress_mode,
+        "cookie": args.cookie,
+        "agent_mode": args.agent,
+        "execution_backend": args.backend,
+    }
+    if args.chatgpt_plan:
+        try:
+            with local_chatgpt_plan_session(args.model) as plan_model:
+                run_options["model"] = plan_model
+                report = run_job(auth, **run_options)
+        except ChatGPTAuthError as exc:
+            parser.error(str(exc))
+    else:
+        report = run_job(auth, **run_options)
     if args.save:
         save_job(report)
     print(json.dumps(report, indent=2, default=str))

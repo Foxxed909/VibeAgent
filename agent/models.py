@@ -12,7 +12,12 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
-from .request_context import current_provider_key
+from .request_context import (
+    current_provider_key,
+    current_chatgpt_plan_token,
+    current_chatgpt_plan_models,
+    current_chatgpt_plan_default_model,
+)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 AI_GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions"
@@ -38,10 +43,12 @@ def allowed_models() -> set[str]:
         for value in (os.environ.get("VIBE_AGENT_ALLOWED_MODELS") or "").split(",")
         if value.strip()
     }
+    plan_models = set(current_chatgpt_plan_models())
     if configured:
-        return configured
+        return configured | plan_models
     defaults = set(FREE_MODELS)
     defaults.update({"gpt-6-luna", "gpt-5.6-luna"})
+    defaults.update(plan_models)
     defaults.update({
         "openai/gpt-6-luna",
         "google/gemini-3-flash",
@@ -73,6 +80,18 @@ def chat(
     tools: Optional[List[Dict[str, Any]]] = None,
     reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
+    plan_token = current_chatgpt_plan_token()
+    if plan_token:
+        selected = model or current_chatgpt_plan_default_model()
+        if not selected or selected not in set(current_chatgpt_plan_models()):
+            raise OpenRouterError("Choose a model available to the signed-in ChatGPT account.")
+        return _chatgpt_plan_responses_chat(
+            messages,
+            access_token=plan_token,
+            model=selected,
+            tools=tools,
+        )
+
     model = validate_requested_model(model)
     selected = model or (os.environ.get("VIBEAGENT_MODEL") or "").strip()
     if selected.startswith("google/") and current_provider_key("google"):
@@ -280,6 +299,217 @@ def _openrouter_chat(
         "reasoning_effort": "none",
     }
     return data
+
+
+def _responses_input(messages: List[Dict[str, Any]]) -> tuple[str, List[Dict[str, Any]]]:
+    instructions = []
+    items: List[Dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        content = message.get("content")
+        if role in {"system", "developer"}:
+            if content:
+                instructions.append(str(content))
+            continue
+        if role == "tool":
+            call_id = message.get("tool_call_id")
+            if isinstance(call_id, str) and call_id:
+                items.append({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": str(content or ""),
+                })
+            continue
+        tool_calls = message.get("tool_calls")
+        if role == "assistant" and isinstance(tool_calls, list) and tool_calls:
+            if content:
+                items.append({"role": "assistant", "content": str(content)})
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                function = tool_call.get("function") or {}
+                name = function.get("name")
+                call_id = tool_call.get("id")
+                arguments = function.get("arguments") or "{}"
+                if not isinstance(name, str) or not isinstance(call_id, str):
+                    continue
+                if not isinstance(arguments, str):
+                    arguments = json.dumps(arguments, separators=(",", ":"))
+                items.append({
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": arguments,
+                })
+            continue
+        if role in {"user", "assistant"}:
+            items.append({"role": role, "content": content if content is not None else ""})
+    return "\n\n".join(instructions), items
+
+
+def _responses_tools(tools: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    result = []
+    for tool in tools or []:
+        if not isinstance(tool, dict) or tool.get("type") != "function":
+            continue
+        function = tool.get("function") or {}
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        result.append({
+            "type": "function",
+            "name": name,
+            "description": str(function.get("description") or ""),
+            "parameters": function.get("parameters") or {
+                "type": "object",
+                "properties": {},
+            },
+        })
+    return result
+
+
+def _normalize_responses_result(response: Dict[str, Any], model: str) -> Dict[str, Any]:
+    content_parts = []
+    tool_calls = []
+    for item in response.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "message":
+            for part in item.get("content") or []:
+                if isinstance(part, dict) and part.get("type") in {"output_text", "text"}:
+                    text = part.get("text")
+                    if isinstance(text, str):
+                        content_parts.append(text)
+        elif item.get("type") == "function_call":
+            name = item.get("name")
+            call_id = item.get("call_id") or item.get("id")
+            arguments = item.get("arguments") or "{}"
+            if isinstance(name, str) and isinstance(call_id, str):
+                if not isinstance(arguments, str):
+                    arguments = json.dumps(arguments, separators=(",", ":"))
+                tool_calls.append({
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": arguments},
+                })
+    content = "".join(content_parts) or response.get("output_text")
+    if not isinstance(content, str) or not content:
+        content = None
+    return {
+        "id": response.get("id"),
+        "model": response.get("model") or model,
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls or None,
+            },
+            "finish_reason": "tool_calls" if tool_calls else "stop",
+        }],
+    }
+
+
+def _chatgpt_plan_responses_chat(
+    messages: List[Dict[str, Any]],
+    *,
+    access_token: str,
+    model: str,
+    tools: Optional[List[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    instructions, input_items = _responses_input(messages)
+    body: Dict[str, Any] = {
+        "model": model,
+        "input": input_items,
+        "store": False,
+        "stream": True,
+    }
+    if instructions:
+        body["instructions"] = instructions
+    response_tools = _responses_tools(tools)
+    if response_tools:
+        body["tools"] = response_tools
+        body["tool_choice"] = "auto"
+
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        },
+        method="POST",
+    )
+    completed: Optional[Dict[str, Any]] = None
+    pending_data: List[str] = []
+    response_bytes = 0
+
+    def consume_event(raw_data: str) -> None:
+        nonlocal completed
+        if not raw_data or raw_data == "[DONE]":
+            return
+        try:
+            event = json.loads(raw_data)
+        except json.JSONDecodeError as exc:
+            raise OpenRouterError("ChatGPT plan returned an invalid stream event.") from exc
+        if not isinstance(event, dict):
+            return
+        event_type = event.get("type")
+        if event_type == "response.completed":
+            response = event.get("response")
+            if isinstance(response, dict):
+                completed = response
+        elif event_type in {"response.failed", "error"}:
+            response = event.get("response") or {}
+            error = response.get("error") if isinstance(response, dict) else None
+            error = error or event.get("error") or {}
+            code = error.get("code") if isinstance(error, dict) else None
+            if code in {
+                "subscription_sharing_usage_limit_exceeded",
+                "subscription_sharing_usage_unavailable",
+                "subscription_sharing_user_not_eligible",
+            }:
+                raise OpenRouterError(f"ChatGPT plan request failed ({code}).")
+            raise OpenRouterError("ChatGPT plan request failed.")
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as stream:
+            while True:
+                line = stream.readline(MAX_PROVIDER_RESPONSE_BYTES + 1)
+                if not line:
+                    break
+                response_bytes += len(line)
+                if response_bytes > MAX_PROVIDER_RESPONSE_BYTES:
+                    raise OpenRouterError("ChatGPT plan response exceeded 4 MB.")
+                decoded = line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if not decoded:
+                    if pending_data:
+                        consume_event("\n".join(pending_data))
+                        pending_data = []
+                    continue
+                if decoded.startswith("data:"):
+                    pending_data.append(decoded[5:].lstrip())
+            if pending_data:
+                consume_event("\n".join(pending_data))
+    except urllib.error.HTTPError as exc:
+        raise OpenRouterError(f"ChatGPT plan request failed with HTTP {exc.code}.") from exc
+    except urllib.error.URLError as exc:
+        raise OpenRouterError("Could not reach the OpenAI Responses API.") from exc
+    except TimeoutError as exc:
+        raise OpenRouterError("ChatGPT plan request timed out.") from exc
+
+    if completed is None:
+        raise OpenRouterError("ChatGPT plan stream ended without response.completed.")
+    result = _normalize_responses_result(completed, model)
+    result["_vibeagent"] = {
+        "provider": "openai-chatgpt-plan",
+        "model": result.get("model") or model,
+        "reasoning_effort": "account-default",
+    }
+    return result
 
 
 DEFAULT_MODEL = DEFAULT_OPENROUTER
