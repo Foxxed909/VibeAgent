@@ -7,9 +7,11 @@ Affordable autonomous **authorized** security testing with two agent modes:
 
 Both modes share the same model layer, scope enforcement, SSE live thread, job persistence and reports.
 
+The quality loop is bounded and evidence-led: deterministic baseline, model-guided investigation, exact-duplicate suppression, reproduction of material findings, independent review, then final synthesis. Tool, round, retry and retest budgets are fixed by the selected depth profile.
+
 ## Product tiers
 
-- **Hobby** — $50 / scan · exact URLs/hosts only (exact Vercel app hostnames supported) · optional private invite support
+- **Hobby** — $50 / scan · exact URLs/hosts only (exact Vercel app hostnames supported) · private invite or API access token required
 - **Enterprise** — $200 / scan · hosts, URLs, IP ranges
 
 Powered by [VibeHacking](https://github.com/Foxxed909/VibeHacking) tools. Agents only operate against targets the user declares and confirms.
@@ -73,7 +75,7 @@ export VIBEHACKING_ROOT=/path/to/VibeHacking
 
 ## Security hardening
 
-### Private invite codes
+### Scan access
 
 No invite/access code is embedded in the frontend or repository. Optional invite access uses only a server-side SHA-256 digest:
 
@@ -82,6 +84,34 @@ VIBE_AGENT_INVITE_CODE_SHA256=<64-character-sha256>
 ```
 
 The raw code is compared server-side using a constant-time digest comparison. `VIBE_AGENT_TRIAL_CODE_SHA256` remains accepted as a legacy deployment alias.
+
+Live scans fail closed unless either a valid private invite is submitted or an operator API token is configured and sent as `X-VibeAgent-Token` (or `Authorization: Bearer ...`):
+
+```bash
+VIBE_AGENT_API_TOKEN=<long-random-operator-token>
+```
+
+For an intentionally unauthenticated local demo, set `VIBE_AGENT_ALLOW_UNAUTHENTICATED_SCANS=1`. Do not set it on a public deployment.
+
+### Model allowlist
+
+API callers cannot select arbitrary provider models. Configure the exact permitted identifiers when overriding the built-in defaults:
+
+```bash
+VIBE_AGENT_ALLOWED_MODELS=gpt-6-luna,openai/gpt-6-luna,google/gemini-3-flash
+```
+
+Exact `provider/model` IDs route through Vercel AI Gateway. Vercel deployments use the injected `VERCEL_OIDC_TOKEN`; local or non-Vercel runtimes can set `AI_GATEWAY_API_KEY`. Provider keys are never passed to browser code or scan tools.
+
+Use an OpenAI model as the main VibeAgent planner and a Google model as an independent evidence reviewer:
+
+```bash
+VIBEAGENT_MODEL=gpt-6-luna
+VIBE_AGENT_REVIEW_MODEL=google/gemini-3-flash
+VIBE_AGENT_ALLOWED_MODELS=gpt-6-luna,google/gemini-3-flash
+```
+
+Hosted ChatGPT-plan usage requires OpenAI's approved Sign in with ChatGPT partner path. This remote Vercel app therefore uses supported API/Gateway credentials unless that approval is obtained. Google consumer subscriptions likewise are not stored or scraped; Google models are reached through AI Gateway or a supported provider API.
 
 ### API origin boundary
 
@@ -97,15 +127,27 @@ JSON request bodies default to a 16 KB maximum; `VIBE_AGENT_MAX_JSON_BODY_BYTES`
 
 Optional Cloudflare/session cookies are stored in a per-request `ContextVar`, not process-global environment state, so warm/concurrent workers cannot leak one scan's cookie into another.
 
-### Worker target ownership
+### Target ownership
 
-Worker-backed execution requires an exact HTTPS ownership proof at:
+Every hosted live scan requires an exact HTTPS ownership proof at:
 
 ```text
 /.well-known/vibeagent-verification.txt
 ```
 
-The verification API only operates on hosts already present in the standalone worker allowlist, and the scan UI will not enable worker-tools until both allowlisting and ownership verification succeed.
+The verification fetch refuses redirects and blocks loopback, private, link-local, reserved and cloud-metadata address ranges. The scan UI will not launch until ownership verification succeeds. Set `VIBE_AGENT_REQUIRE_OWNERSHIP=0` only for a deliberately isolated local runtime.
+
+On serverless deployments, set a strong signing key so challenges and short-lived host-bound proof receipts are stateless and survive instance rotation:
+
+```bash
+VIBE_AGENT_VERIFICATION_SECRET=<at-least-32-random-characters>
+```
+
+Proof receipts are scoped to one exact hostname, expire automatically, and are held in browser session storage. If the signing key is absent, the legacy KV/local state flow remains available.
+
+### Outbound request boundary
+
+Portable probes accept HTTP(S) URLs only, reject embedded credentials, resolve each destination immediately before use, block non-global address classes, and refuse redirects. This keeps an exact authorized hostname from turning into a redirect-based or DNS-based internal-network request. A local-only scanner can opt into private targets with `VIBE_AGENT_ALLOW_PRIVATE_TARGETS=1`.
 
 ## Persistent VibeHacking worker
 
@@ -151,7 +193,7 @@ UI path. Native BreakAgent whole-agent delegation remains separately gated by
 The scan form queries `/api/capabilities` and only enables worker-tools when the
 exact target passes both allowlists, ownership verification succeeds, and the worker advertises its
 protected remote audit bridge. Challenge creation/confirmation is exposed through
-`POST /api/verify_target`. Configure Vercel KV / Upstash for reliable verification state on serverless deployments.
+`POST /api/verify_target`. Stateless signed verification is recommended; KV / Upstash remains supported for legacy verification state.
 
 ## Workspace
 
@@ -163,14 +205,26 @@ Open `/app` for the persisted security workspace:
 
 The workspace is backed by `GET /api/jobs?include=findings`. KV / Upstash is recommended so history survives serverless instance rotation.
 
+Job IDs are high-entropy capability identifiers. Listing all jobs requires a separate operator token:
+
+```bash
+VIBE_AGENT_WORKSPACE_TOKEN=<long-random-workspace-token>
+```
+
+Enter that token on `/app`; it is retained only in the current browser tab.
+
 ## Deploy on Vercel
 
 1. Import this repo into Vercel.
 2. Framework: **Other**.
-3. Set `OPENAI_API_KEY` and/or `OPENROUTER_API_KEY`.
-4. For durable jobs and waitlist entries, configure Vercel KV / Upstash REST variables.
-5. Optionally configure the protected native worker variables above.
-6. Deploy.
+3. Set `OPENAI_API_KEY`, or use Vercel AI Gateway with deployment OIDC. OpenRouter remains an optional fallback.
+4. Configure `VIBE_AGENT_INVITE_CODE_SHA256` and/or `VIBE_AGENT_API_TOKEN` for live-scan access.
+5. Configure `VIBE_AGENT_WORKSPACE_TOKEN` for `/app` history access.
+6. Set `VIBE_AGENT_VERIFICATION_SECRET` for stateless target verification.
+7. For durable jobs and waitlist entries, configure Vercel KV / Upstash REST variables.
+8. Configure `VIBE_AGENT_REVIEW_MODEL=google/gemini-3-flash` and include it in `VIBE_AGENT_ALLOWED_MODELS` for dual-model review.
+9. Optionally configure the protected native worker variables above.
+10. Deploy.
 
 ## Status
 
@@ -180,7 +234,8 @@ The workspace is backed by `GET /api/jobs?include=findings`. KV / Upstash is rec
 - [x] BreakAgent validation mode
 - [x] Expanded portable VibeAgent tool surface
 - [x] Agent-specific tool policies
-- [x] OpenAI + OpenRouter model paths
+- [x] OpenAI + Google through Vercel AI Gateway, plus direct OpenAI/OpenRouter paths
+- [x] Bounded evidence/retest loop with independent reviewer model
 - [x] Live SSE thread UI with agent identity
 - [x] Canonical structured findings with validation status, CWE/OWASP, evidence and remediation
 - [x] JSON + SARIF 2.1.0 report exports
@@ -192,7 +247,10 @@ The workspace is backed by `GET /api/jobs?include=findings`. KV / Upstash is rec
 - [x] Server-side hashed private invite validation
 - [x] Per-job cookie isolation
 - [x] Same-origin sensitive API boundary + request-size limits
-- [x] Worker target ownership verification
+- [x] All live-scan target ownership verification
+- [x] Stateless, signed, exact-host verification receipts for serverless deployments
+- [x] SSRF-resistant outbound address policy + redirect refusal
+- [x] Scan, workspace and model-selection access boundaries
 - [ ] Billing
 
 Exact host declarations never authorize sibling or child subdomains; list every authorized hostname explicitly.

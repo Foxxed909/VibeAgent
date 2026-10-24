@@ -104,9 +104,9 @@
       </select>
       <p class="hint" id="backend-hint">Portable mode uses the bounded serverless tool implementations.</p>
       <div class="verify-box" id="verify-box">
-        <strong>Verify ownership for VibeHacking worker-tools</strong>
+        <strong>Verify target ownership</strong>
         <p id="verify-message" style="margin-top:6px;color:var(--text-muted)">
-          This exact host is approved by the worker policy but still needs proof of control.
+          Live scans require proof that you control this exact hostname.
         </p>
         <div id="verify-challenge" style="display:none;margin-top:10px">
           Put this exact token at <code>/.well-known/vibeagent-verification.txt</code>:
@@ -147,6 +147,15 @@
       <input id="cookie" name="cookie" placeholder="cf_clearance=…" autocomplete="off" />
       <p class="hint">We do not bypass robot checks. Allowlist or paste your own cookie.</p>
 
+      <label for="openai_api_key">OpenAI API key</label>
+      <input id="openai_api_key" name="openai_api_key" type="password" required placeholder="sk-…" autocomplete="new-password" spellcheck="false" />
+      <p class="hint">Runs the VibeAgent planner with your API account. This is an API key, not a ChatGPT subscription login.</p>
+
+      <label for="google_api_key">Google Gemini API key</label>
+      <input id="google_api_key" name="google_api_key" type="password" required placeholder="AIza…" autocomplete="new-password" spellcheck="false" />
+      <p class="hint">Runs the independent Google evidence review. Keys are sent only for this scan and are never saved in job reports.</p>
+      <p class="hint">Use dedicated keys you can revoke. VibeAgent sends them to its same-origin server over HTTPS to call each provider; API usage is billed under your provider account.</p>
+
       <label for="confirm">Confirmation phrase</label>
       <input id="confirm" name="confirm" required autocomplete="off" placeholder="I OWN OR AM AUTHORIZED TO TEST THESE TARGETS" />
 
@@ -172,6 +181,11 @@
     const verifyChallenge = document.getElementById("verify-challenge");
     const verifyToken = document.getElementById("verify-token");
     let capabilityTimer = null;
+    let targetVerified = false;
+    let ownershipProofs = (() => {
+      try { return JSON.parse(sessionStorage.getItem("vibeagent_ownership_proofs") || "{}"); }
+      catch { return {}; }
+    })();
 
     function updateStressState() {
       const stress = document.getElementById("stress");
@@ -188,6 +202,7 @@
     async function refreshWorkerAvailability() {
       const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
       workerToolsOption.disabled = true;
+      targetVerified = false;
       if (targets.length !== 1) {
         if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
         verifyBox.style.display = "none";
@@ -198,18 +213,21 @@
         return;
       }
       try {
+        const proof = ownershipProofs[targets[0]] || "";
         const res = await fetch(
           "/api/capabilities?target=" + encodeURIComponent(targets[0]) +
-          "&agent=" + encodeURIComponent(agentMode)
+          "&agent=" + encodeURIComponent(agentMode),
+          { headers: proof ? { "X-VibeAgent-Verification": proof } : {} }
         );
         const data = await res.json();
         const worker = data.worker_tools || {};
+        targetVerified = Boolean(data.ownership_verified);
         workerToolsOption.disabled = !worker.can_launch;
-        verifyBox.style.display = worker.allowlisted && !worker.ownership_verified ? "block" : "none";
+        verifyBox.style.display = targetVerified ? "none" : "block";
         if (worker.can_launch) {
           backendHint.textContent = "VibeHacking worker tools are available for this verified exact target" +
             (worker.tool_count ? " · " + worker.tool_count + " native tools" : "") + ".";
-        } else if (worker.allowlisted && !worker.ownership_verified) {
+        } else if (worker.allowlisted && !targetVerified) {
           if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
           backendHint.textContent = "Worker-tools is allowlisted, but ownership verification is required.";
         } else {
@@ -217,6 +235,7 @@
           backendHint.textContent = worker.message || "VibeHacking worker tools are not available for this target.";
         }
       } catch {
+        targetVerified = false;
         if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
         verifyBox.style.display = "none";
         backendHint.textContent = "Could not verify VibeHacking worker tools; using portable mode.";
@@ -285,7 +304,11 @@
         const res = await fetch("/api/verify_target", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target: targets[0], action }),
+          body: JSON.stringify({
+            target: targets[0],
+            action,
+            access_code: document.getElementById("access_code").value.trim() || null,
+          }),
         });
         const data = await res.json();
         if (!data.ok) {
@@ -297,7 +320,11 @@
           verifyChallenge.style.display = "block";
           verifyMessage.textContent = "Challenge created. Publish the token, then tap Confirm verification.";
         } else {
-          verifyMessage.textContent = "Ownership verified. Worker-tools is now available for this host.";
+          if (data.proof) {
+            ownershipProofs[targets[0]] = data.proof;
+            sessionStorage.setItem("vibeagent_ownership_proofs", JSON.stringify(ownershipProofs));
+          }
+          verifyMessage.textContent = "Ownership verified. Live scans are now available for this host.";
           verifyChallenge.style.display = "none";
           await refreshWorkerAvailability();
         }
@@ -323,6 +350,9 @@
       }
       const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
       if (!targets.length) { err.textContent = "Add at least one target."; err.hidden = false; return; }
+      if (targets.length === 1 && !targetVerified) {
+        err.textContent = "Verify ownership of the target before launching a live scan."; err.hidden = false; return;
+      }
 
       const effectiveTier = tier;
       let depth = document.getElementById("depth").value || "standard";
@@ -355,6 +385,13 @@
         stress_multiplier: executionBackend === "portable" && stressVal ? parseInt(stressVal, 10) : null,
         stress_mode: stressOrg ? "org" : "capped",
         cookie: document.getElementById("cookie").value.trim() || null,
+        provider_keys: {
+          openai: document.getElementById("openai_api_key").value.trim(),
+          google: document.getElementById("google_api_key").value.trim(),
+        },
+        ownership_proofs: Object.fromEntries(
+          targets.filter(target => ownershipProofs[target]).map(target => [target, ownershipProofs[target]])
+        ),
       };
       if (payload.stress_multiplier && !(hasInvite || effectiveTier === "enterprise")) {
         err.textContent = "Stress requires Enterprise or a valid private invite."; err.hidden = false; return;
@@ -368,6 +405,8 @@
 
       // Store payload so thread can start SSE
       sessionStorage.setItem("vibeagent_pending_scan", JSON.stringify(payload));
+      document.getElementById("openai_api_key").value = "";
+      document.getElementById("google_api_key").value = "";
       location.href = "/thread?live=1";
     };
 

@@ -226,6 +226,7 @@
 
     async function startLive() {
       const raw = sessionStorage.getItem('vibeagent_pending_scan');
+      sessionStorage.removeItem('vibeagent_pending_scan');
       if (!raw) {
         statusEl.textContent = 'no payload';
         statusEl.className = 'badge error';
@@ -237,24 +238,30 @@
         empty.textContent = 'Bad pending payload'; return;
       }
       setAgent(payload.agent_mode === 'break' ? 'BreakAgent' : 'VibeAgent');
-      sessionStorage.removeItem('vibeagent_pending_scan');
       statusEl.textContent = 'streaming';
       statusEl.className = 'badge running';
       row('system', '', 'Connecting live stream…');
+
+      let requestBody = JSON.stringify(payload);
+      if (payload.provider_keys) {
+        for (const provider of Object.keys(payload.provider_keys)) payload.provider_keys[provider] = '';
+        delete payload.provider_keys;
+      }
 
       try {
         const res = await fetch('/api/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body: requestBody,
         });
         if (!res.ok || !res.body) {
           // fallback to non-stream scan
           const r2 = await fetch('/api/scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body: requestBody,
           });
+          requestBody = '';
           const data = await r2.json();
           if (data.ok && data.report) {
             sessionStorage.setItem('vibeagent_last_report', JSON.stringify(data.report));
@@ -266,6 +273,7 @@
           }
           return;
         }
+        requestBody = '';
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
@@ -285,6 +293,7 @@
           }
         }
       } catch (e) {
+        requestBody = '';
         row('finding', 'error', String(e));
         statusEl.textContent = 'error';
         statusEl.className = 'badge error';

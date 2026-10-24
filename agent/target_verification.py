@@ -1,25 +1,19 @@
-"""Ownership verification for native-worker targets.
-
-Verification is intentionally limited to exact hostnames already approved by the
-server-side native-worker allowlist, preventing this endpoint from becoming a
-general-purpose SSRF primitive.
-"""
+"""Exact-host ownership verification for live scans."""
 from __future__ import annotations
 
 import hashlib
 import hmac
+import base64
 import json
 import os
 import secrets
-import ssl
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .worker_client import get_worker_config, target_host, target_is_worker_allowed
+from .net_safety import NetworkSafetyError, request_url
 
 KV_URL = (os.environ.get("KV_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL") or "").rstrip("/")
 KV_TOKEN = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN") or ""
@@ -27,15 +21,67 @@ STATE_DIR = Path(os.environ.get("VIBE_AGENT_VERIFY_DIR", "/tmp/vibeagent_verify"
 CHALLENGE_TTL = int(os.environ.get("VIBE_AGENT_VERIFY_CHALLENGE_TTL", "900"))
 VERIFIED_TTL = int(os.environ.get("VIBE_AGENT_VERIFIED_TTL", "604800"))
 VERIFY_PATH = "/.well-known/vibeagent-verification.txt"
+STATELESS_PREFIX = "vibeagent-v1"
 
 
 class VerificationError(RuntimeError):
     pass
 
 
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+def _verification_secret() -> bytes:
+    value = (os.environ.get("VIBE_AGENT_VERIFICATION_SECRET") or "").strip()
+    return value.encode("utf-8")
+
+
+def _b64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def _signed_token(kind: str, host: str, ttl: int) -> str:
+    secret = _verification_secret()
+    if len(secret) < 32:
+        raise VerificationError("VIBE_AGENT_VERIFICATION_SECRET must contain at least 32 characters")
+    payload = json.dumps(
+        {
+            "v": 1,
+            "kind": kind,
+            "host": host,
+            "exp": int(time.time()) + ttl,
+            "nonce": secrets.token_urlsafe(12),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    encoded = _b64url_encode(payload)
+    signature = hmac.new(secret, encoded.encode("ascii"), hashlib.sha256).digest()
+    return f"{STATELESS_PREFIX}.{encoded}.{_b64url_encode(signature)}"
+
+
+def _verify_signed_token(token: str, *, kind: str, host: str) -> bool:
+    secret = _verification_secret()
+    if len(secret) < 32:
+        return False
+    parts = (token or "").strip().split(".")
+    if len(parts) != 3 or parts[0] != STATELESS_PREFIX:
+        return False
+    try:
+        expected = hmac.new(secret, parts[1].encode("ascii"), hashlib.sha256).digest()
+        supplied = _b64url_decode(parts[2])
+        if not hmac.compare_digest(supplied, expected):
+            return False
+        payload = json.loads(_b64url_decode(parts[1]).decode("utf-8"))
+        return bool(
+            payload.get("v") == 1
+            and payload.get("kind") == kind
+            and payload.get("host") == host
+            and int(payload.get("exp") or 0) >= int(time.time())
+        )
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
 
 
 def _kv_enabled() -> bool:
@@ -97,14 +143,21 @@ def _exact_https_target(target: str) -> tuple[str, str]:
     host = (parsed.hostname or "").lower().rstrip(".")
     if parsed.scheme != "https" or not host or parsed.username or parsed.password:
         raise VerificationError("ownership verification requires an exact HTTPS target")
-    cfg = get_worker_config()
-    if not cfg or not target_is_worker_allowed("https://" + host, cfg):
-        raise VerificationError("target is not approved by the native-worker allowlist")
     return host, "https://" + host
 
 
 def create_challenge(target: str) -> Dict[str, Any]:
     host, origin = _exact_https_target(target)
+    if _verification_secret():
+        token = _signed_token("challenge", host, CHALLENGE_TTL)
+        return {
+            "host": host,
+            "token": token,
+            "path": VERIFY_PATH,
+            "verification_url": origin + VERIFY_PATH,
+            "expires_in": CHALLENGE_TTL,
+            "mode": "stateless",
+        }
     token = "vibeagent-" + secrets.token_urlsafe(24)
     record = {"host": host, "token": token, "created_at": int(time.time())}
     _write_state(_host_key("verify-challenge", host), record, CHALLENGE_TTL)
@@ -118,33 +171,34 @@ def create_challenge(target: str) -> Dict[str, Any]:
 
 
 def _fetch_verification(url: str) -> str:
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "VibeAgent-OwnershipVerifier/1.0", "Accept": "text/plain"},
-        method="GET",
-    )
-    opener = urllib.request.build_opener(
-        urllib.request.HTTPSHandler(context=ssl.create_default_context()),
-        _NoRedirectHandler(),
-    )
     try:
-        with opener.open(req, timeout=10) as resp:
-            body = resp.read(4097)
-            if len(body) > 4096:
-                raise VerificationError("verification file is too large")
-            if resp.status != 200:
-                raise VerificationError(f"verification URL returned HTTP {resp.status}")
-    except urllib.error.HTTPError as exc:
-        raise VerificationError(f"verification URL returned HTTP {exc.code}") from exc
-    except VerificationError:
-        raise
-    except Exception as exc:
-        raise VerificationError("verification URL could not be reached") from exc
-    return body.decode("utf-8", errors="replace").strip()
+        response = request_url(
+            url,
+            headers={"User-Agent": "VibeAgent-OwnershipVerifier/1.0", "Accept": "text/plain"},
+            timeout=10,
+            max_bytes=4096,
+            require_https=True,
+        )
+    except NetworkSafetyError as exc:
+        raise VerificationError(str(exc)) from exc
+    if response.status != 200:
+        raise VerificationError(f"verification URL returned HTTP {response.status}")
+    return response.body.decode("utf-8", errors="replace").strip()
 
 
 def confirm_challenge(target: str) -> Dict[str, Any]:
     host, origin = _exact_https_target(target)
+    if _verification_secret():
+        actual = _fetch_verification(origin + VERIFY_PATH)
+        if not _verify_signed_token(actual, kind="challenge", host=host):
+            raise VerificationError("verification token did not match, expired, or was issued for another host")
+        return {
+            "host": host,
+            "verified": True,
+            "expires_in": VERIFIED_TTL,
+            "proof": _signed_token("proof", host, VERIFIED_TTL),
+            "mode": "stateless",
+        }
     record = _read_state(_host_key("verify-challenge", host))
     if not record:
         raise VerificationError("no active verification challenge for this host")
@@ -157,10 +211,12 @@ def confirm_challenge(target: str) -> Dict[str, Any]:
     return {"host": host, "verified": True, "expires_in": VERIFIED_TTL}
 
 
-def is_target_verified(target: str) -> bool:
+def is_target_verified(target: str, proof: Optional[str] = None) -> bool:
     try:
         host, _ = _exact_https_target(target)
     except VerificationError:
         return False
+    if proof and _verify_signed_token(proof, kind="proof", host=host):
+        return True
     record = _read_state(_host_key("verified-host", host))
     return bool(record and record.get("host") == host)

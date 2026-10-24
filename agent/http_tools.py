@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import re
-import ssl
-import urllib.error
-import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 from .cf_detect import challenge_advice, is_challenge_page
+from .net_safety import request_url
 from .request_context import current_cookie
 
 UA = "VibeAgent/0.2 (+authorized-scan)"
@@ -69,17 +67,19 @@ def _fetch(
     req_headers.update(_extra_headers())
     if headers:
         req_headers.update(headers)
-    req = urllib.request.Request(url, method=method, headers=req_headers)
-    ctx = ssl.create_default_context()
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            body = resp.read(200_000).decode("utf-8", errors="replace")
-            hdrs = {k.lower(): v for k, v in resp.headers.items()}
-            return resp.getcode() or 0, body, hdrs
-    except urllib.error.HTTPError as e:
-        body = e.read(100_000).decode("utf-8", errors="replace") if e.fp else ""
-        hdrs = {k.lower(): v for k, v in (e.headers.items() if e.headers else [])}
-        return e.code or 0, body, hdrs
+        response = request_url(
+            url,
+            method=method,
+            headers=req_headers,
+            timeout=timeout,
+            max_bytes=200_000,
+        )
+        return (
+            response.status,
+            response.body.decode("utf-8", errors="replace"),
+            response.headers,
+        )
     except Exception as e:
         return 0, str(e), {}
 

@@ -153,6 +153,44 @@ class AgentModeTests(unittest.TestCase):
         self.assertNotIn("ash", tools)
         self.assertNotIn("spider", tools)
 
+    def test_evidence_loop_skips_exact_duplicate_tool_calls(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["https://demo.vercel.app"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Demo",
+        )
+        repeated_call = {
+            "choices": [{
+                "message": {
+                    "content": "Checking headers.",
+                    "tool_calls": [{
+                        "id": "call-1",
+                        "function": {
+                            "name": "vibe_headers",
+                            "arguments": '{"url":"https://demo.vercel.app"}',
+                        },
+                    }],
+                },
+            }],
+            "_vibeagent": {"model": "test-model", "provider": "test", "reasoning_effort": "none"},
+        }
+        finished = {"choices": [{"message": {"content": "Evidence complete.", "tool_calls": []}}]}
+        final = {"choices": [{"message": {"content": "## Findings\n\n- No confirmed findings."}}]}
+        result = {"returncode": 0, "stdout": "headers checked", "backend": "portable"}
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "agent.orchestrator.get_forced_tools", return_value=[]
+        ), patch(
+            "agent.orchestrator._dispatch_tool", return_value=result
+        ) as dispatch, patch(
+            "agent.orchestrator.chat", side_effect=[repeated_call, repeated_call, finished, final]
+        ):
+            report = run_job(auth, depth="standard")
+        self.assertEqual(1, dispatch.call_count)
+        self.assertEqual(1, report["loop"]["duplicate_calls_skipped"])
+        self.assertEqual("completed", report["loop"]["phase"])
+        self.assertIn("## Findings", report["report_text"])
+
 
 if __name__ == "__main__":
     unittest.main()

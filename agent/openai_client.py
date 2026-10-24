@@ -9,7 +9,10 @@ import os
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from .request_context import current_provider_key
+
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+MAX_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
 
 MODEL_GPT6_LUNA = "gpt-6-luna"
 MODEL_GPT56_LUNA = "gpt-5.6-luna"
@@ -29,7 +32,7 @@ def chat(
     tools: Optional[List[Dict[str, Any]]] = None,
     reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
-    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    key = current_provider_key("openai") or os.environ.get("OPENAI_API_KEY", "").strip()
     if not key:
         raise OpenAIError("OPENAI_API_KEY is not set.")
 
@@ -59,10 +62,14 @@ def chat(
     )
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            raw = resp.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_PROVIDER_RESPONSE_BYTES:
+                raise OpenAIError("OpenAI response exceeded 4 MB")
+            data = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        raise OpenAIError(f"OpenAI HTTP {e.code}: {detail}") from e
+        # Provider error bodies can echo credentials or request data; they
+        # must not flow into scan events or persisted reports.
+        raise OpenAIError(f"OpenAI API request failed with HTTP {e.code}.") from e
 
     # Normalize metadata for the thread UI
     data["_vibeagent"] = {

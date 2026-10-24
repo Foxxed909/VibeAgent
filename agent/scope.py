@@ -14,7 +14,7 @@ import os
 import re
 from dataclasses import dataclass
 from typing import List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 CONFIRM_PHRASE = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS"
 
@@ -37,10 +37,15 @@ class Authorization:
     access_code: Optional[str] = None  # trial code
 
     def validated(self) -> "Authorization":
-        if self.confirmation.strip() != CONFIRM_PHRASE:
+        self.tier = (self.tier or "").strip().lower()
+        if self.tier not in {"hobby", "enterprise"}:
+            raise ScopeError("Tier must be hobby or enterprise.")
+        if not isinstance(self.confirmation, str) or self.confirmation.strip() != CONFIRM_PHRASE:
             raise ScopeError("Confirmation phrase mismatch. Scan refused.")
-        if not self.targets:
+        if not isinstance(self.targets, list) or not self.targets:
             raise ScopeError("At least one exact target is required.")
+        if len(self.targets) > 10:
+            raise ScopeError("At most 10 exact targets are allowed per job.")
 
         trial = is_valid_trial_code(self.access_code)
         if self.access_code and not trial:
@@ -51,6 +56,8 @@ class Authorization:
 
         normalized = []
         for raw in self.targets:
+            if not isinstance(raw, str) or len(raw) > 2048:
+                raise ScopeError("Each target must be a string no longer than 2048 characters.")
             t = normalize_target(raw)
             if not t:
                 raise ScopeError(f"Invalid or empty target: {raw!r}")
@@ -59,7 +66,8 @@ class Authorization:
                     raise ScopeError(
                         f"Hobby tier only allows exact URLs/hosts. Rejected: {raw}"
                     )
-            normalized.append(t)
+            if t not in normalized:
+                normalized.append(t)
         self.targets = normalized
 
         if self.tier == "hobby" and not self.app_name:
@@ -74,7 +82,9 @@ class ScopeError(ValueError):
 
 
 def is_valid_trial_code(code: Optional[str]) -> bool:
-    supplied = (code or "").strip()
+    if not isinstance(code, str):
+        return False
+    supplied = code.strip()
     expected = (
         os.environ.get(INVITE_CODE_SHA256_ENV)
         or os.environ.get(LEGACY_TRIAL_CODE_SHA256_ENV)
@@ -87,10 +97,41 @@ def is_valid_trial_code(code: Optional[str]) -> bool:
 
 
 def normalize_target(raw: str) -> str:
-    raw = (raw or "").strip()
+    if not isinstance(raw, str):
+        return ""
+    raw = raw.strip()
     if not raw or raw.startswith("#"):
         return ""
-    if "*" in raw:
+    if "*" in raw or "?" in raw or "#" in raw:
+        return ""
+    if "://" in raw:
+        try:
+            parsed = urlsplit(raw)
+            _ = parsed.port
+        except ValueError:
+            return ""
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            return ""
+        return raw.rstrip("/")
+
+    # CIDR is accepted for Enterprise scope declarations only; Hobby rejects it.
+    try:
+        ipaddress.ip_network(raw, strict=False)
+        return raw
+    except ValueError:
+        pass
+
+    try:
+        parsed = urlsplit("//" + raw)
+        _ = parsed.port
+    except ValueError:
+        return ""
+    if not parsed.hostname or parsed.path not in ("", "/") or parsed.username or parsed.password:
         return ""
     return raw.rstrip("/")
 
@@ -102,15 +143,27 @@ def is_hobby_allowed(target: str) -> bool:
         return False
     if "://" in t:
         try:
-            p = urlparse(t)
-            return bool(p.hostname)
+            p = urlsplit(t)
+            _ = p.port
+            return bool(
+                p.scheme in {"http", "https"}
+                and p.hostname
+                and p.username is None
+                and p.password is None
+            )
         except Exception:
             return False
-    if re.match(r"^[a-z0-9.-]+$", t) and "." in t:
-        return True
-    if t in ("localhost", "127.0.0.1", "::1") or t.startswith("127.0.0.1:"):
-        return True
-    return False
+    try:
+        ipaddress.ip_network(t, strict=False)
+        return "/" not in t
+    except ValueError:
+        pass
+    try:
+        p = urlsplit("//" + t)
+        _ = p.port
+        return bool(p.hostname and p.path in ("", "/") and "." in p.hostname)
+    except ValueError:
+        return False
 
 
 def host_in_scope(host: str, auth: Authorization) -> bool:
@@ -121,7 +174,7 @@ def host_in_scope(host: str, auth: Authorization) -> bool:
         t = target.lower()
         if "://" in t:
             try:
-                th = urlparse(t).hostname or ""
+                th = urlsplit(t).hostname or ""
             except Exception:
                 th = ""
         else:
@@ -141,8 +194,12 @@ def host_in_scope(host: str, auth: Authorization) -> bool:
 
 def assert_url_in_scope(url: str, auth: Authorization) -> None:
     try:
-        host = urlparse(url).hostname or ""
+        parsed = urlsplit(url)
+        _ = parsed.port
+        host = parsed.hostname or ""
     except Exception:
-        host = ""
+        raise ScopeError(f"Invalid URL: {url}")
+    if parsed.scheme.lower() not in {"http", "https"} or parsed.username or parsed.password:
+        raise ScopeError(f"Invalid URL scheme or authority: {url}")
     if not host_in_scope(host, auth):
         raise ScopeError(f"URL out of scope: {url}")

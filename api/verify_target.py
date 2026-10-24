@@ -11,7 +11,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from agent.target_verification import VerificationError, confirm_challenge, create_challenge
-from api._security import apply_cors, read_json_body, require_allowed_origin
+from api._security import apply_cors, read_json_body, require_allowed_origin, require_scan_access
 
 
 class handler(BaseHTTPRequestHandler):
@@ -32,6 +32,10 @@ class handler(BaseHTTPRequestHandler):
             data = json.loads((raw or b"{}").decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return self._json(400, {"ok": False, "error": "invalid JSON"})
+        if not isinstance(data, dict):
+            return self._json(400, {"ok": False, "error": "JSON body must be an object"})
+        if not require_scan_access(self, data.get("access_code")):
+            return
 
         target = str(data.get("target") or "").strip()
         action = str(data.get("action") or "challenge").strip().lower()

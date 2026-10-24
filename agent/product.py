@@ -10,7 +10,7 @@ ALL_DEPTHS = {"quick", "standard", "deep"}
 
 
 def resolve_depth(tier: str, depth: Optional[str], access_code: Optional[str]) -> str:
-    d = (depth or "standard").strip().lower()
+    d = depth.strip().lower() if isinstance(depth, str) else "standard"
     trial = is_valid_trial_code(access_code)
     # Trial code may use deep; plain hobby cannot
     if tier == "hobby" and not trial:
@@ -38,7 +38,7 @@ def resolve_stress(
         # Hobby without code: no stress
         return None, "capped"
 
-    mode = (stress_mode or "capped").strip().lower()
+    mode = stress_mode.strip().lower() if isinstance(stress_mode, str) else "capped"
     if mode == "org" and not enterprise:
         # Only full enterprise may pick org-managed limits (not trial hobby)
         mode = "capped"
@@ -48,7 +48,10 @@ def resolve_stress(
     else:
         allowed = {5, 10, 20}
 
-    m = int(multiplier)
+    try:
+        m = int(multiplier)
+    except (TypeError, ValueError):
+        return None, "capped"
     if m not in allowed:
         # clamp to nearest allowed or drop
         if mode == "org" and m > 20:

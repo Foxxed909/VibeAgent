@@ -12,12 +12,14 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from agent.job_store import backend_name, list_jobs
-from api._security import apply_cors, require_allowed_origin
+from api._security import apply_cors, require_allowed_origin, require_workspace_access
 
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not require_allowed_origin(self):
+            return
+        if not require_workspace_access(self):
             return
         qs = parse_qs(urlparse(self.path).query)
         try:
