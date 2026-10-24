@@ -12,7 +12,7 @@ if ROOT not in sys.path:
 
 from agent.models import OpenRouterError, validate_requested_model
 from agent.product import resolve_depth
-from agent.queue_store import cancel, enqueue, require_queue
+from agent.queue_store import cancel, enqueue, require_queue, worker_online
 from agent.scope import Authorization, ScopeError, normalize_target
 from agent.target_verification import is_target_verified
 from api._security import (
