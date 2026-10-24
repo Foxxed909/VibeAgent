@@ -468,6 +468,9 @@ def _run_job_impl(
     emit("phase", name="reproduce")
     _retest_findings(auth, report, emit, profile, worker_tools=worker_tools)
 
+    analysis_effort = (os.environ.get("VIBE_AGENT_ANALYSIS_EFFORT") or "high").strip().lower()
+    if analysis_effort not in {"none", "low", "medium", "high"}:
+        analysis_effort = "high"
     review_model = (os.environ.get("VIBE_AGENT_REVIEW_MODEL") or "").strip()
     if review_model:
         report["loop"]["phase"] = "independent_review"
@@ -501,6 +504,7 @@ def _run_job_impl(
                 retries=profile.model_retries,
                 emit=emit,
                 purpose="independent review",
+                reasoning_effort=analysis_effort,
             )
             review_choice = (review_completion.get("choices") or [{}])[0]
             review_text = str((review_choice.get("message") or {}).get("content") or "").strip()
@@ -527,6 +531,9 @@ def _run_job_impl(
                 f"Write the final {active_agent} report with a ## Findings section. "
                 "Use only collected tool evidence, incorporate reproduced/unconfirmed status and reviewer corrections, "
                 "deduplicate claims, and include severity, evidence, URL and fix guidance. "
+                "Use attacker-style threat reasoning but clearly distinguish what was actually tested. "
+                "For every material finding include the preconditions, attack surface, observed behavior, "
+                "confidence, contradictory evidence, impact rationale, and remediation. "
                 "Challenges are informational and authorization is context, not evidence."
             ),
         })
@@ -541,6 +548,7 @@ def _run_job_impl(
                 retries=profile.model_retries,
                 emit=emit,
                 purpose="synthesis",
+                reasoning_effort=analysis_effort,
             )
             meta = completion.get("_vibeagent") or {}
             if meta.get("model"):
@@ -587,11 +595,12 @@ def _chat_with_retry(
     retries: int,
     emit,
     purpose: str,
+    reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
     last_error: Optional[Exception] = None
     for attempt in range(1, max(1, retries) + 1):
         try:
-            return chat(messages, model=model, tools=tools, max_tokens=max_tokens)
+            return chat(messages, model=model, tools=tools, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
         except (OpenRouterError, OpenAIError) as exc:
             last_error = exc
             if attempt >= max(1, retries):

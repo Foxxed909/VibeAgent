@@ -9,7 +9,7 @@ Never unbounded from this SaaS process; Vercel maxDuration still applies.
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
@@ -91,31 +91,43 @@ def run_stress(
 
     headers = {"User-Agent": UA, "Accept": "*/*"}
     if cookie:
-        headers["Cookie"] = cookie
-
-    status_counts: Dict[int, int] = {}
+        headers["Cookie"] =    status_counts: Dict[int, int] = {}
     ok = fail = challenge = completed = 0
-    t0 = time.time()
+    t0 = time.monotonic()
+    deadline = t0 + duration_s
 
     def job(_: int) -> Tuple[int, bool]:
-        return _one_get(url, headers, timeout=8.0)
+        return _one_get(url, headers, timeout=max(0.5, min(8.0, deadline - time.monotonic())))
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = [pool.submit(job, i) for i in range(planned)]
-        for fut in as_completed(futs):
-            st, ch = fut.result()
-            completed += 1
-            status_counts[st] = status_counts.get(st, 0) + 1
-            if ch:
-                challenge += 1
-            elif 200 <= st < 400:
-                ok += 1
-            else:
-                fail += 1
-            if time.time() - t0 > duration_s + 5:
+    pool = ThreadPoolExecutor(max_workers=workers)
+    pending = set()
+    submitted = 0
+    try:
+        while time.monotonic() < deadline and (submitted < planned or pending):
+            while submitted < planned and len(pending) < workers and time.monotonic() < deadline:
+                pending.add(pool.submit(job, submitted))
+                submitted += 1
+            if not pending:
                 break
+            finished, pending = wait(pending, timeout=min(0.2, max(0.0, deadline - time.monotonic())), return_when=FIRST_COMPLETED)
+            for fut in finished:
+                st, ch = fut.result()
+                completed += 1
+                status_counts[st] = status_counts.get(st, 0) + 1
+                if ch:
+                    challenge += 1
+                elif 200 <= st < 400:
+                    ok += 1
+                else:
+                    fail += 1
+    finally:
+        for fut in pending:
+            fut.cancel()
+        pool.shutdown(wait=False, cancel_futures=True)
 
-    elapsed = max(time.time() - t0, 0.001)
+  break
+
+    elapsed = max(time.monotonic() - t0, 0.001)
     note = (
         f"Stress mode={mode}. "
         + ("Platform safety caps." if mode == "capped" else "Org-managed higher limits; org accepts operational risk on owned targets.")

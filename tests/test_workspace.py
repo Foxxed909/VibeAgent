@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -36,6 +37,17 @@ class WorkspaceStoreTests(unittest.TestCase):
         self.assertIn('data-tab="reports"', html)
         self.assertIn("/api/jobs?limit=40&include=findings", html)
         self.assertIn("/api/report?id=", html)
+
+
+    def test_hosted_scan_fails_closed_without_persistent_store(self):
+        with patch.dict(os.environ, {"VERCEL": "1"}, clear=False), patch.object(job_store, "_kv_enabled", return_value=False):
+            with self.assertRaises(RuntimeError):
+                job_store.ensure_durable_store()
+
+    def test_redis_failure_must_not_be_masked_by_local_file(self):
+        with patch.dict(os.environ, {"VERCEL": "1"}, clear=False), patch.object(job_store, "_kv_enabled", return_value=True), patch.object(job_store, "_kv_command", side_effect=RuntimeError("redis down")):
+            with self.assertRaises(RuntimeError):
+                job_store.save_job({"job_id": "abc123456789", "status": "completed"})
 
 
 if __name__ == "__main__":

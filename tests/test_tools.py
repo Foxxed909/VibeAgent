@@ -16,6 +16,7 @@ class ToolCatalogTests(unittest.TestCase):
         expected = {
             "cloud_scout", "ash", "spider", "openapi_scout", "vibe_headers",
             "corscan", "phantom", "leep", "env_probe", "ghost", "api_finder", "senoria",
+            "api_check", "nextjs_rsc_audit", "redirect", "cache_audit",
         }
         self.assertEqual(expected, names)
         self.assertNotIn("bot_breaker", names)
@@ -68,6 +69,29 @@ class ToolCatalogTests(unittest.TestCase):
         with patch.object(http_tools, "_fetch", side_effect=fake_fetch):
             out = http_tools.tool_corscan("https://example.com/api/me")
         self.assertIn("CRITICAL: reflected Origin with credentials=true", out)
+
+
+    def test_unreachable_headers_are_not_reported_as_vulnerabilities(self):
+        with patch.object(http_tools, "_fetch", return_value=(0, "DNS lookup failed", {})):
+            result = http_tools.tool_vibe_headers("https://example.com")
+        self.assertIn("INCONCLUSIVE", result)
+        self.assertNotIn("MISSING:", result)
+
+    def test_new_portable_tools_are_executable(self):
+        with patch.object(http_tools, "_fetch", return_value=(200, "<html>ok</html>", {"content-type": "text/html"})):
+            for tool in ("api_check", "nextjs_rsc_audit", "redirect", "cache_audit"):
+                result = http_tools.run_builtin(tool, {"url": "https://example.com"})
+                self.assertEqual(0, result["returncode"], tool)
+                self.assertFalse(result.get("stub"), tool)
+
+    def test_redirect_probe_recognizes_untrusted_location_without_following(self):
+        def fake_fetch(url, **kwargs):
+            if "next=" in url:
+                return 302, "", {"location": "https://redirect-test.invalid/vibeagent-canary"}
+            return 200, "ok", {}
+        with patch.object(http_tools, "_fetch", side_effect=fake_fetch):
+            result = http_tools.tool_redirect("https://example.com/login")
+        self.assertIn("POSSIBLE exposure:", result)
 
 
 if __name__ == "__main__":

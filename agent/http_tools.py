@@ -427,8 +427,8 @@ def tool_api_check(url: str) -> str:
     """Single-endpoint HTTP diagnostics without interpreting a status as a vulnerability."""
     status, body, headers = _fetch(url)
     if not status:
-        return f"Endpoint: {url}\\nINCONCLUSIVE: request failed: {body[:200]}"
-    return "\\n".join([
+        return f"Endpoint: {url}\nINCONCLUSIVE: request failed: {body[:200]}"
+    return "\n".join([
         f"Endpoint: {url}", f"HTTP status: {status}",
         f"Content-Type: {headers.get('content-type', '(none)')}",
         f"Cache-Control: {headers.get('cache-control', '(none)')}",
@@ -442,7 +442,7 @@ def tool_nextjs_rsc_audit(url: str) -> str:
     lines = [f"Next.js / RSC passive audit: {base}"]
     status, body, headers = _fetch(base)
     if not status:
-        return "\\n".join(lines + ["INCONCLUSIVE: target unreachable"])
+        return "\n".join(lines + ["INCONCLUSIVE: target unreachable"])
     markers = ("__NEXT_DATA__", "/_next/", "next-route-announcer")
     lines.append("Next.js markers observed" if any(m in body for m in markers) or "x-nextjs-cache" in headers else "No Next.js markers in the sampled response")
     for path in ("/_next/data/", "/_next/static/"):
@@ -450,7 +450,7 @@ def tool_nextjs_rsc_audit(url: str) -> str:
         if st in (200, 401, 403):
             lines.append(f"ROUTE {path}: HTTP {st} type={hdrs.get('content-type', '(none)')}")
     lines.append("No middleware-bypass, private RSC leakage or Server Action exploitation was attempted.")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def tool_redirect(url: str) -> str:
@@ -469,7 +469,7 @@ def tool_redirect(url: str) -> str:
             lines.append(f"POSSIBLE exposure: untrusted external redirect via {name}, HTTP {status}")
     if len(lines) == 1:
         lines.append("No externally controllable redirect observed for common query parameters")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def tool_cache_audit(url: str) -> str:
@@ -483,7 +483,7 @@ def tool_cache_audit(url: str) -> str:
     if len(lines) == 1:
         lines.append("No HTTP 200 on the sampled candidate routes")
     lines.append("Do not claim a vulnerability without proving user-specific sensitive data is cacheable.")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 BUILTIN = {
