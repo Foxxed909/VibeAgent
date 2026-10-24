@@ -150,6 +150,26 @@ def _exact_https_target(target: str) -> tuple[str, str]:
     return host, "https://" + host
 
 
+def _operator_host_approved(host: str) -> bool:
+    approved = {
+        item.strip().lower().rstrip(".")
+        for item in os.environ.get("VIBE_AGENT_OWNER_APPROVED_HOSTS", "").split(",")
+        if item.strip() and "*" not in item and "/" not in item and ":" not in item
+    }
+    return host in approved
+
+
+def is_operator_approved_proof(target: str, proof: Optional[str] = None) -> bool:
+    try:
+        host, _ = _exact_https_target(target)
+    except VerificationError:
+        return False
+    return bool(
+        proof and _operator_host_approved(host)
+        and _verify_signed_token(proof, kind="operator-proof", host=host)
+    )
+
+
 def approve_operator_target(target: str) -> Dict[str, Any]:
     """Issue an ordinary exact-host proof for a deployment-admin approved host.
 
@@ -166,12 +186,7 @@ def approve_operator_target(target: str) -> Dict[str, Any]:
         raise VerificationError("invalid target port") from exc
     if port not in (None, 443):
         raise VerificationError("operator approval supports only the standard HTTPS port")
-    approved = {
-        item.strip().lower().rstrip(".")
-        for item in os.environ.get("VIBE_AGENT_OWNER_APPROVED_HOSTS", "").split(",")
-        if item.strip() and "*" not in item and "/" not in item and ":" not in item
-    }
-    if not approved or host not in approved:
+    if not _operator_host_approved(host):
         raise VerificationError("hostname is not approved by this deployment's operator")
     if len(_verification_secret()) < 32:
         raise VerificationError("a strong VIBE_AGENT_VERIFICATION_SECRET is required")
@@ -180,7 +195,7 @@ def approve_operator_target(target: str) -> Dict[str, Any]:
         "host": host,
         "verified": True,
         "expires_in": approval_ttl,
-        "proof": _signed_token("proof", host, approval_ttl),
+        "proof": _signed_token("operator-proof", host, approval_ttl),
         "mode": "operator-approved",
     }
 
@@ -256,6 +271,8 @@ def is_target_verified(target: str, proof: Optional[str] = None) -> bool:
     except VerificationError:
         return False
     if proof and _verify_signed_token(proof, kind="proof", host=host):
+        return True
+    if is_operator_approved_proof(target, proof):
         return True
     record = _read_state(_host_key("verified-host", host))
     return bool(record and record.get("host") == host)
