@@ -3,17 +3,25 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import secrets
 import subprocess
 import sys
 import time
-import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin
 
-from .models import chat, OpenRouterError
+from .models import chat, OpenRouterError, validate_requested_model
 from .scope import Authorization, ScopeError, assert_url_in_scope, CONFIRM_PHRASE, is_valid_trial_code
-from .tools_catalog import (agent_name, get_forced_tools, get_system_prompt, get_tool_catalog, normalize_agent_mode)
+from .tools_catalog import (
+    ALL_VIBEHACKING_TOOLS,
+    agent_name,
+    get_forced_tools,
+    get_system_prompt,
+    get_tool_catalog,
+    normalize_agent_mode,
+)
 from .depth import get_depth, DepthProfile
 from .findings import add_finding, finding_from_line, finding_from_worker, severity_counts
 from .worker_client import (
@@ -41,6 +49,7 @@ except ImportError:
 
 VIBEHACKING_ROOT = os.environ.get("VIBEHACKING_ROOT", "")
 EventCb = Optional[Callable[[Dict[str, Any]], None]]
+KNOWN_TOOL_NAMES = {tool["function"]["name"] for tool in ALL_VIBEHACKING_TOOLS}
 
 
 def _emit(cb: EventCb, event: Dict[str, Any]) -> None:
@@ -101,11 +110,13 @@ def _run_job_impl(
 ) -> Dict[str, Any]:
     auth = auth.validated()
     trial = is_valid_trial_code(auth.access_code)
-    job_id = job_id or str(uuid.uuid4())[:12]
+    job_id = job_id or secrets.token_urlsafe(18)
     profile = get_depth(depth)
     agent_mode = normalize_agent_mode(agent_mode)
     active_agent = agent_name(agent_mode)
+    model = validate_requested_model(model)
     tool_catalog = get_tool_catalog(native=bool(VIBEHACKING_ROOT), agent_mode=agent_mode)
+    catalog_names = {tool["function"]["name"] for tool in tool_catalog}
     execution_backend = (execution_backend or "portable").strip().lower()
     if execution_backend not in {"portable", "worker-tools", "native-worker"}:
         execution_backend = "portable"
@@ -306,10 +317,15 @@ def _run_job_impl(
             report["reasoning_effort"] = meta.get("reasoning_effort") or "none"
             emit("model_info", model=report["model"], provider=report.get("provider"), reasoning_effort=report.get("reasoning_effort"))
 
-        choice = (completion.get("choices") or [{}])[0]
+        choices = completion.get("choices") or []
+        choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
         message = choice.get("message") or {}
+        if not isinstance(message, dict):
+            message = {}
         content = message.get("content")
         tool_calls = message.get("tool_calls") or []
+        if not isinstance(tool_calls, list):
+            tool_calls = []
         reasoning = message.get("reasoning") or message.get("reasoning_content")
         if reasoning:
             emit("reasoning", text=str(reasoning)[:6000])
@@ -325,16 +341,28 @@ def _run_job_impl(
             break
 
         for tc in tool_calls:
+            if not isinstance(tc, dict):
+                report["errors"].append("Model returned an invalid tool call object.")
+                continue
             fn = tc.get("function") or {}
+            if not isinstance(fn, dict):
+                report["errors"].append("Model returned an invalid tool function object.")
+                continue
             name = fn.get("name") or ""
+            if not isinstance(name, str):
+                name = ""
             tc_id = tc.get("id") or name
             try:
                 args = json.loads(fn.get("arguments") or "{}")
-            except json.JSONDecodeError:
+            except (TypeError, json.JSONDecodeError):
+                args = {}
+            if not isinstance(args, dict):
                 args = {}
             url = args.get("url") or ""
             emit("tool_start", tool=name, args=args)
             try:
+                if name not in catalog_names:
+                    raise ScopeError(f"Tool is not available to {active_agent}: {name!r}")
                 if url:
                     assert_url_in_scope(url, auth)
                 result = _dispatch_tool(name, args, auth, profile, worker_tools=worker_tools)
@@ -563,25 +591,9 @@ def _parse_api_hits(base: str, stdout: str) -> List[str]:
             if candidate.startswith(("http://", "https://")):
                 hits.append(candidate)
                 continue
-        if "\u2192" not in line and "\u2192" not in line and "\u2192" not in line:
-            if "\u2192" not in line and "->" not in line and "\u2192" not in line:
-                # support both arrow forms
-                if "\u2192" not in line and "\u2192" not in line:
-                    pass
-        arrow = "\u2192" if "\u2192" in line else ("->" if "->" in line else None)
-        # Prefer unicode arrow used in http_tools
-        if "\u2192" in line:
-            arrow = "\u2192"
-        elif "\u2192" in line:
-            arrow = "\u2192"
-        elif "->" in line:
-            arrow = "->"
-        else:
-            # actual character →
-            if "\u2192" in line or chr(0x2192) in line:
-                arrow = chr(0x2192)
-            else:
-                continue
+        arrow = "→" if "→" in line else ("->" if "->" in line else None)
+        if arrow is None:
+            continue
         if "CHALLENGE" in line:
             continue
         path = line.split(arrow)[0].strip().split()[0]
@@ -674,6 +686,8 @@ def _dispatch_tool(
     *,
     worker_tools=None,
 ) -> Any:
+    if name not in KNOWN_TOOL_NAMES:
+        raise ScopeError(f"unknown tool: {name!r}")
     url = args.get("url") or ""
     worker_tools = set(worker_tools or ())
     worker_error = ""
@@ -692,7 +706,14 @@ def _dispatch_tool(
             worker_error = str(exc)
 
     if VIBEHACKING_ROOT:
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name or ""):
+            raise ScopeError("invalid native tool name")
         script = Path(VIBEHACKING_ROOT) / "TOOLS" / f"{name}.py"
+        tools_root = (Path(VIBEHACKING_ROOT) / "TOOLS").resolve()
+        try:
+            script.resolve().relative_to(tools_root)
+        except ValueError as exc:
+            raise ScopeError("native tool path escaped the tools directory") from exc
         if script.exists():
             cmd = [sys.executable, str(script), "--url", url]
             if name == "spider":
@@ -707,6 +728,7 @@ def _dispatch_tool(
                 capture_output=True, text=True,
                 timeout=(profile.tool_timeout_s if profile else 20),
                 cwd=VIBEHACKING_ROOT,
+                env=_native_tool_environment(),
             )
             return {
                 "backend": "local-vibehacking",
@@ -732,6 +754,18 @@ def _dispatch_tool(
         "message": f"Tool {name} acknowledged for {url}.",
         "worker_error": worker_error or None,
     }
+
+
+def _native_tool_environment() -> Dict[str, str]:
+    """Pass runtime basics to local tools without provider/storage credentials."""
+    allowed = {
+        "PATH", "PYTHONPATH", "LANG", "LC_ALL", "TZ",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
+        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+    }
+    child = {key: value for key, value in os.environ.items() if key in allowed}
+    child["PYTHONUNBUFFERED"] = "1"
+    return child
 
 
 def save_job(report: Dict[str, Any]) -> str:

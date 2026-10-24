@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import hmac
+import json
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -33,7 +35,75 @@ def origin_is_allowed(handler) -> bool:
     except Exception:
         return False
     host = request_host(handler)
-    return bool(parsed.hostname and host and parsed.netloc.lower() == host)
+    return bool(
+        parsed.scheme.lower() in {"http", "https"}
+        and parsed.hostname
+        and parsed.username is None
+        and parsed.password is None
+        and host
+        and parsed.netloc.lower() == host
+    )
+
+
+def _header_token(handler, name: str) -> str:
+    direct = (handler.headers.get(name) or "").strip()
+    if direct:
+        return direct
+    auth = (handler.headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+def _write_json_error(handler, code: int, message: str) -> None:
+    payload = json.dumps({"ok": False, "error": message}).encode("utf-8")
+    handler.send_response(code)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Cache-Control", "no-store")
+    apply_cors(handler)
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.end_headers()
+    handler.wfile.write(payload)
+
+
+def require_scan_access(handler, access_code: Optional[str]) -> bool:
+    """Fail closed for paid/model-backed scans unless an operator configured access."""
+    api_token = (os.environ.get("VIBE_AGENT_API_TOKEN") or "").strip()
+    supplied = _header_token(handler, "X-VibeAgent-Token")
+    if api_token and supplied and hmac.compare_digest(supplied, api_token):
+        return True
+
+    from agent.scope import is_valid_trial_code
+
+    if is_valid_trial_code(access_code):
+        return True
+    if (os.environ.get("VIBE_AGENT_ALLOW_UNAUTHENTICATED_SCANS") or "").strip().lower() in {"1", "true", "yes"}:
+        return True
+
+    configured = bool(
+        api_token
+        or os.environ.get("VIBE_AGENT_INVITE_CODE_SHA256")
+        or os.environ.get("VIBE_AGENT_TRIAL_CODE_SHA256")
+    )
+    _write_json_error(
+        handler,
+        401 if configured else 503,
+        "valid scan access is required" if configured else "scan access is not configured",
+    )
+    return False
+
+
+def require_workspace_access(handler) -> bool:
+    expected = (os.environ.get("VIBE_AGENT_WORKSPACE_TOKEN") or "").strip()
+    supplied = _header_token(handler, "X-VibeAgent-Workspace-Token")
+    if expected and supplied and hmac.compare_digest(supplied, expected):
+        return True
+    _write_json_error(
+        handler,
+        401 if expected else 503,
+        "workspace token required" if expected else "workspace access is not configured",
+    )
+    return False
 
 
 def apply_cors(handler) -> None:

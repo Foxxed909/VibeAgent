@@ -11,10 +11,12 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from agent.scope import Authorization, ScopeError
+from agent.models import OpenRouterError, validate_requested_model
 from agent.orchestrator import run_job
 from agent.job_store import save_job, backend_name
 from agent.product import resolve_depth, resolve_stress
-from api._security import apply_cors, read_json_body, require_allowed_origin
+from agent.target_verification import is_target_verified
+from api._security import apply_cors, read_json_body, require_allowed_origin, require_scan_access
 
 
 class handler(BaseHTTPRequestHandler):
@@ -26,12 +28,23 @@ class handler(BaseHTTPRequestHandler):
             return self._json(code, {"ok": False, "error": error})
         try:
             data = json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError:
+        except (UnicodeDecodeError, json.JSONDecodeError):
             return self._json(400, {"ok": False, "error": "invalid JSON"})
+        if not isinstance(data, dict):
+            return self._json(400, {"ok": False, "error": "JSON body must be an object"})
+        text_fields = (
+            "tier", "confirmation", "app_name", "company_name", "contact_email",
+            "emergency_contact", "note", "access_code", "model", "depth",
+            "stress_mode", "cookie", "agent_mode", "execution_backend",
+        )
+        if any(data.get(key) is not None and not isinstance(data.get(key), str) for key in text_fields):
+            return self._json(400, {"ok": False, "error": "text fields must contain strings"})
 
         targets = data.get("targets") or []
         if isinstance(targets, str):
             targets = [t.strip() for t in targets.splitlines() if t.strip()]
+        if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
+            return self._json(400, {"ok": False, "error": "targets must be a string or list of strings"})
 
         auth = Authorization(
             tier=(data.get("tier") or "hobby").lower(),
@@ -45,7 +58,12 @@ class handler(BaseHTTPRequestHandler):
             access_code=data.get("access_code") or None,
         )
         dry = bool(data.get("dry_run"))
-        model = data.get("model") or None
+        if not dry and not require_scan_access(self, data.get("access_code")):
+            return
+        try:
+            model = validate_requested_model(data.get("model") or None)
+        except OpenRouterError as exc:
+            return self._json(400, {"ok": False, "error": str(exc)})
         depth = resolve_depth(auth.tier, data.get("depth"), auth.access_code)
         stress_m, stress_mode = resolve_stress(
             auth.tier, auth.access_code, data.get("stress_multiplier"), data.get("stress_mode")
@@ -55,6 +73,10 @@ class handler(BaseHTTPRequestHandler):
         execution_backend = data.get("execution_backend") or "portable"
 
         try:
+            if not dry and (os.environ.get("VIBE_AGENT_REQUIRE_OWNERSHIP", "1").strip().lower() not in {"0", "false", "no"}):
+                unverified = [target for target in targets if not is_target_verified(target)]
+                if unverified:
+                    raise ScopeError("Target ownership verification is required before a live scan.")
             report = run_job(
                 auth,
                 dry_run=dry,
@@ -78,8 +100,8 @@ class handler(BaseHTTPRequestHandler):
             })
         except ScopeError as e:
             return self._json(403, {"ok": False, "error": str(e)})
-        except Exception as e:
-            return self._json(500, {"ok": False, "error": str(e)})
+        except Exception:
+            return self._json(500, {"ok": False, "error": "scan failed"})
 
     def do_OPTIONS(self):
         if not require_allowed_origin(self):

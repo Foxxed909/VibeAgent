@@ -1,9 +1,4 @@
-"""Ownership verification for native-worker targets.
-
-Verification is intentionally limited to exact hostnames already approved by the
-server-side native-worker allowlist, preventing this endpoint from becoming a
-general-purpose SSRF primitive.
-"""
+"""Exact-host ownership verification for live scans."""
 from __future__ import annotations
 
 import hashlib
@@ -11,15 +6,13 @@ import hmac
 import json
 import os
 import secrets
-import ssl
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .worker_client import get_worker_config, target_host, target_is_worker_allowed
+from .net_safety import NetworkSafetyError, request_url
 
 KV_URL = (os.environ.get("KV_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL") or "").rstrip("/")
 KV_TOKEN = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN") or ""
@@ -31,11 +24,6 @@ VERIFY_PATH = "/.well-known/vibeagent-verification.txt"
 
 class VerificationError(RuntimeError):
     pass
-
-
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
 
 
 def _kv_enabled() -> bool:
@@ -97,9 +85,6 @@ def _exact_https_target(target: str) -> tuple[str, str]:
     host = (parsed.hostname or "").lower().rstrip(".")
     if parsed.scheme != "https" or not host or parsed.username or parsed.password:
         raise VerificationError("ownership verification requires an exact HTTPS target")
-    cfg = get_worker_config()
-    if not cfg or not target_is_worker_allowed("https://" + host, cfg):
-        raise VerificationError("target is not approved by the native-worker allowlist")
     return host, "https://" + host
 
 
@@ -118,29 +103,19 @@ def create_challenge(target: str) -> Dict[str, Any]:
 
 
 def _fetch_verification(url: str) -> str:
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "VibeAgent-OwnershipVerifier/1.0", "Accept": "text/plain"},
-        method="GET",
-    )
-    opener = urllib.request.build_opener(
-        urllib.request.HTTPSHandler(context=ssl.create_default_context()),
-        _NoRedirectHandler(),
-    )
     try:
-        with opener.open(req, timeout=10) as resp:
-            body = resp.read(4097)
-            if len(body) > 4096:
-                raise VerificationError("verification file is too large")
-            if resp.status != 200:
-                raise VerificationError(f"verification URL returned HTTP {resp.status}")
-    except urllib.error.HTTPError as exc:
-        raise VerificationError(f"verification URL returned HTTP {exc.code}") from exc
-    except VerificationError:
-        raise
-    except Exception as exc:
-        raise VerificationError("verification URL could not be reached") from exc
-    return body.decode("utf-8", errors="replace").strip()
+        response = request_url(
+            url,
+            headers={"User-Agent": "VibeAgent-OwnershipVerifier/1.0", "Accept": "text/plain"},
+            timeout=10,
+            max_bytes=4096,
+            require_https=True,
+        )
+    except NetworkSafetyError as exc:
+        raise VerificationError(str(exc)) from exc
+    if response.status != 200:
+        raise VerificationError(f"verification URL returned HTTP {response.status}")
+    return response.body.decode("utf-8", errors="replace").strip()
 
 
 def confirm_challenge(target: str) -> Dict[str, Any]:

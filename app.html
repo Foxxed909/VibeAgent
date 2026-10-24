@@ -42,6 +42,8 @@
     .evidence{margin-top:10px;color:var(--muted);font-size:.88rem;white-space:pre-wrap;word-break:break-word}
     .empty{padding:50px 20px;text-align:center;color:var(--muted);border:1px dashed var(--border);border-radius:12px}
     .error{color:#fca5a5}
+    .workspace-auth{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+    .workspace-auth input{flex:1;min-width:220px;background:var(--elev);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text)}
     @media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}.actions{margin-left:0;width:100%}}
   </style>
 </head>
@@ -71,6 +73,12 @@
     <div class="stat"><b id="stat-agents">—</b><span>Agent modes used</span></div>
   </section>
 
+  <section class="workspace-auth">
+    <input id="workspace-token" type="password" autocomplete="off" placeholder="Workspace token" aria-label="Workspace token" />
+    <button class="btn" id="unlock">Unlock workspace</button>
+    <span class="mono">kept in this tab only</span>
+  </section>
+
   <div class="tabs">
     <button class="tab active" data-tab="runs">Runs</button>
     <button class="tab" data-tab="findings">Findings</button>
@@ -89,6 +97,8 @@
     reports: document.getElementById('panel-reports'),
   };
   let jobs = [];
+  const workspaceTokenInput = document.getElementById('workspace-token');
+  workspaceTokenInput.value = sessionStorage.getItem('vibeagent_workspace_token') || '';
 
   function esc(v) {
     return String(v == null ? '' : v)
@@ -193,7 +203,10 @@
   async function load() {
     Object.values(panels).forEach(p => p.innerHTML = '<div class="empty">Loading…</div>');
     try {
-      const res = await fetch('/api/jobs?limit=40&include=findings');
+      const token = workspaceTokenInput.value.trim();
+      const res = await fetch('/api/jobs?limit=40&include=findings', {
+        headers: token ? {'X-VibeAgent-Workspace-Token': token} : {},
+      });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load jobs');
       jobs = data.jobs || [];
@@ -208,6 +221,12 @@
   }
 
   document.getElementById('refresh').onclick = load;
+  document.getElementById('unlock').onclick = () => {
+    const token = workspaceTokenInput.value.trim();
+    if (token) sessionStorage.setItem('vibeagent_workspace_token', token);
+    else sessionStorage.removeItem('vibeagent_workspace_token');
+    load();
+  };
   load();
 </script>
 </body>

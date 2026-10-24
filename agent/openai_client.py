@@ -10,6 +10,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+MAX_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
 
 MODEL_GPT6_LUNA = "gpt-6-luna"
 MODEL_GPT56_LUNA = "gpt-5.6-luna"
@@ -59,9 +60,12 @@ def chat(
     )
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            raw = resp.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_PROVIDER_RESPONSE_BYTES:
+                raise OpenAIError("OpenAI response exceeded 4 MB")
+            data = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
+        detail = e.read(2000).decode("utf-8", errors="replace")
         raise OpenAIError(f"OpenAI HTTP {e.code}: {detail}") from e
 
     # Normalize metadata for the thread UI

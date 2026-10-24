@@ -7,6 +7,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+MAX_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
 
 FREE_MODELS = [
     "inclusionai/ling-3.0-flash-fin:free",
@@ -21,6 +22,33 @@ class OpenRouterError(RuntimeError):
     pass
 
 
+def allowed_models() -> set[str]:
+    configured = {
+        value.strip()
+        for value in (os.environ.get("VIBE_AGENT_ALLOWED_MODELS") or "").split(",")
+        if value.strip()
+    }
+    if configured:
+        return configured
+    defaults = set(FREE_MODELS)
+    defaults.update({"gpt-6-luna", "gpt-5.6-luna"})
+    env_default = (os.environ.get("VIBEAGENT_MODEL") or "").strip()
+    if env_default:
+        defaults.add(env_default)
+    return defaults
+
+
+def validate_requested_model(model: Optional[str]) -> Optional[str]:
+    if model is None:
+        return None
+    if not isinstance(model, str) or not model.strip() or len(model) > 160:
+        raise OpenRouterError("invalid model identifier")
+    selected = model.strip()
+    if selected not in allowed_models():
+        raise OpenRouterError("requested model is not in VIBE_AGENT_ALLOWED_MODELS")
+    return selected
+
+
 def chat(
     messages: List[Dict[str, Any]],
     *,
@@ -30,6 +58,7 @@ def chat(
     tools: Optional[List[Dict[str, Any]]] = None,
     reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
+    model = validate_requested_model(model)
     if os.environ.get("OPENAI_API_KEY", "").strip():
         from .openai_client import chat as openai_chat, DEFAULT_MODEL as OAI_DEFAULT
 
@@ -87,9 +116,12 @@ def _openrouter_chat(
     )
     try:
         with urllib.request.urlopen(req, timeout=90) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            raw = resp.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_PROVIDER_RESPONSE_BYTES:
+                raise OpenRouterError("OpenRouter response exceeded 4 MB")
+            data = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
+        detail = e.read(2000).decode("utf-8", errors="replace")
         raise OpenRouterError(f"OpenRouter HTTP {e.code}: {detail}") from e
 
     data["_vibeagent"] = {

@@ -8,15 +8,15 @@ Never unbounded from this SaaS process; Vercel maxDuration still applies.
 """
 from __future__ import annotations
 
-import ssl
 import time
-import urllib.error
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
+from .net_safety import request_url
+
 UA = "VibeAgent-Stress/0.1 (+authorized-load-test)"
+
 
 CAPPED = {
     "multipliers": {5, 10, 20},
@@ -58,20 +58,12 @@ def _limits(mode: str) -> dict:
 
 
 def _one_get(url: str, headers: Dict[str, str], timeout: float) -> Tuple[int, bool]:
-    req = urllib.request.Request(url, method="GET", headers=headers)
-    ctx = ssl.create_default_context()
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            body = resp.read(4000).decode("utf-8", errors="replace")
-            st = resp.getcode() or 0
-            hdrs = {k.lower(): v for k, v in resp.headers.items()}
-            from .cf_detect import is_challenge_page
-            return st, is_challenge_page(st, body, hdrs)
-    except urllib.error.HTTPError as e:
-        body = e.read(4000).decode("utf-8", errors="replace") if e.fp else ""
-        hdrs = {k.lower(): v for k, v in (e.headers.items() if e.headers else [])}
+        response = request_url(url, headers=headers, timeout=timeout, max_bytes=4000)
+        body = response.body.decode("utf-8", errors="replace")
+        st = response.status
         from .cf_detect import is_challenge_page
-        return e.code or 0, is_challenge_page(e.code or 0, body, hdrs)
+        return st, is_challenge_page(st, body, response.headers)
     except Exception:
         return 0, False
 

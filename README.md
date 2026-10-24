@@ -9,7 +9,7 @@ Both modes share the same model layer, scope enforcement, SSE live thread, job p
 
 ## Product tiers
 
-- **Hobby** — $50 / scan · exact URLs/hosts only (exact Vercel app hostnames supported) · optional private invite support
+- **Hobby** — $50 / scan · exact URLs/hosts only (exact Vercel app hostnames supported) · private invite or API access token required
 - **Enterprise** — $200 / scan · hosts, URLs, IP ranges
 
 Powered by [VibeHacking](https://github.com/Foxxed909/VibeHacking) tools. Agents only operate against targets the user declares and confirms.
@@ -73,7 +73,7 @@ export VIBEHACKING_ROOT=/path/to/VibeHacking
 
 ## Security hardening
 
-### Private invite codes
+### Scan access
 
 No invite/access code is embedded in the frontend or repository. Optional invite access uses only a server-side SHA-256 digest:
 
@@ -82,6 +82,22 @@ VIBE_AGENT_INVITE_CODE_SHA256=<64-character-sha256>
 ```
 
 The raw code is compared server-side using a constant-time digest comparison. `VIBE_AGENT_TRIAL_CODE_SHA256` remains accepted as a legacy deployment alias.
+
+Live scans fail closed unless either a valid private invite is submitted or an operator API token is configured and sent as `X-VibeAgent-Token` (or `Authorization: Bearer ...`):
+
+```bash
+VIBE_AGENT_API_TOKEN=<long-random-operator-token>
+```
+
+For an intentionally unauthenticated local demo, set `VIBE_AGENT_ALLOW_UNAUTHENTICATED_SCANS=1`. Do not set it on a public deployment.
+
+### Model allowlist
+
+API callers cannot select arbitrary provider models. Configure the exact permitted identifiers when overriding the built-in defaults:
+
+```bash
+VIBE_AGENT_ALLOWED_MODELS=gpt-6-luna,gpt-5.6-luna
+```
 
 ### API origin boundary
 
@@ -97,15 +113,19 @@ JSON request bodies default to a 16 KB maximum; `VIBE_AGENT_MAX_JSON_BODY_BYTES`
 
 Optional Cloudflare/session cookies are stored in a per-request `ContextVar`, not process-global environment state, so warm/concurrent workers cannot leak one scan's cookie into another.
 
-### Worker target ownership
+### Target ownership
 
-Worker-backed execution requires an exact HTTPS ownership proof at:
+Every hosted live scan requires an exact HTTPS ownership proof at:
 
 ```text
 /.well-known/vibeagent-verification.txt
 ```
 
-The verification API only operates on hosts already present in the standalone worker allowlist, and the scan UI will not enable worker-tools until both allowlisting and ownership verification succeed.
+The verification fetch refuses redirects and blocks loopback, private, link-local, reserved and cloud-metadata address ranges. The scan UI will not launch until ownership verification succeeds. Set `VIBE_AGENT_REQUIRE_OWNERSHIP=0` only for a deliberately isolated local runtime.
+
+### Outbound request boundary
+
+Portable probes accept HTTP(S) URLs only, reject embedded credentials, resolve each destination immediately before use, block non-global address classes, and refuse redirects. This keeps an exact authorized hostname from turning into a redirect-based or DNS-based internal-network request. A local-only scanner can opt into private targets with `VIBE_AGENT_ALLOW_PRIVATE_TARGETS=1`.
 
 ## Persistent VibeHacking worker
 
@@ -163,14 +183,24 @@ Open `/app` for the persisted security workspace:
 
 The workspace is backed by `GET /api/jobs?include=findings`. KV / Upstash is recommended so history survives serverless instance rotation.
 
+Job IDs are high-entropy capability identifiers. Listing all jobs requires a separate operator token:
+
+```bash
+VIBE_AGENT_WORKSPACE_TOKEN=<long-random-workspace-token>
+```
+
+Enter that token on `/app`; it is retained only in the current browser tab.
+
 ## Deploy on Vercel
 
 1. Import this repo into Vercel.
 2. Framework: **Other**.
 3. Set `OPENAI_API_KEY` and/or `OPENROUTER_API_KEY`.
-4. For durable jobs and waitlist entries, configure Vercel KV / Upstash REST variables.
-5. Optionally configure the protected native worker variables above.
-6. Deploy.
+4. Configure `VIBE_AGENT_INVITE_CODE_SHA256` and/or `VIBE_AGENT_API_TOKEN` for live-scan access.
+5. Configure `VIBE_AGENT_WORKSPACE_TOKEN` for `/app` history access.
+6. For durable jobs and waitlist entries, configure Vercel KV / Upstash REST variables.
+7. Optionally configure `VIBE_AGENT_ALLOWED_MODELS` and the protected native worker variables above.
+8. Deploy.
 
 ## Status
 
@@ -192,7 +222,9 @@ The workspace is backed by `GET /api/jobs?include=findings`. KV / Upstash is rec
 - [x] Server-side hashed private invite validation
 - [x] Per-job cookie isolation
 - [x] Same-origin sensitive API boundary + request-size limits
-- [x] Worker target ownership verification
+- [x] All live-scan target ownership verification
+- [x] SSRF-resistant outbound address policy + redirect refusal
+- [x] Scan, workspace and model-selection access boundaries
 - [ ] Billing
 
 Exact host declarations never authorize sibling or child subdomains; list every authorized hostname explicitly.

@@ -6,19 +6,45 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from agent.orchestrator import run_job
+from agent import orchestrator
+from agent.net_safety import NetworkSafetyError, request_url, validate_outbound_url
+from agent.models import OpenRouterError, validate_requested_model
 from agent.request_context import current_cookie, reset_cookie, set_cookie
 from agent.scope import Authorization, CONFIRM_PHRASE, ScopeError, host_in_scope, is_valid_trial_code
 from agent import target_verification
-from api._security import origin_is_allowed, read_json_body
+from api._security import (
+    origin_is_allowed,
+    read_json_body,
+    require_scan_access,
+    require_workspace_access,
+)
 
 
 class _Handler:
     def __init__(self, headers=None, body=b""):
         self.headers = headers or {}
         self.rfile = io.BytesIO(body)
+
+
+class _ResponseHandler(_Handler):
+    def __init__(self, headers=None, body=b""):
+        super().__init__(headers=headers, body=body)
+        self.wfile = io.BytesIO()
+        self.status = None
+        self.response_headers = []
+
+    def send_response(self, code):
+        self.status = code
+
+    def send_header(self, name, value):
+        self.response_headers.append((name, value))
+
+    def end_headers(self):
+        pass
 
 
 class InviteCodeTests(unittest.TestCase):
@@ -67,6 +93,172 @@ class ScopeHardeningTests(unittest.TestCase):
             with self.assertRaises(ScopeError):
                 auth.validated()
 
+    def test_unknown_tier_is_rejected(self):
+        auth = Authorization(
+            tier="unlimited",
+            targets=["https://example.com"],
+            confirmation=CONFIRM_PHRASE,
+        )
+        with self.assertRaises(ScopeError):
+            auth.validated()
+
+    def test_non_http_url_is_rejected(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["file:///etc/passwd"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Example",
+        )
+        with self.assertRaises(ScopeError):
+            auth.validated()
+
+    def test_generated_job_ids_have_capability_entropy(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["https://example.com"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Example",
+        )
+        report = run_job(auth, dry_run=True)
+        self.assertGreaterEqual(len(report["job_id"]), 24)
+
+    def test_native_tool_name_cannot_escape_tools_directory(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["https://example.com"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Example",
+        ).validated()
+        with tempfile.TemporaryDirectory() as tmp, patch.object(orchestrator, "VIBEHACKING_ROOT", tmp):
+            with self.assertRaises(ScopeError):
+                orchestrator._dispatch_tool("../../payload", {"url": "https://example.com"}, auth)
+
+    def test_unknown_native_tool_is_blocked_even_when_script_exists(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["https://example.com"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Example",
+        ).validated()
+        with tempfile.TemporaryDirectory() as tmp:
+            tools_dir = Path(tmp) / "TOOLS"
+            tools_dir.mkdir()
+            (tools_dir / "stealer.py").write_text("print('nope')", encoding="utf-8")
+            with patch.object(orchestrator, "VIBEHACKING_ROOT", tmp):
+                with self.assertRaises(ScopeError):
+                    orchestrator._dispatch_tool("stealer", {"url": "https://example.com"}, auth)
+
+    def test_native_tools_do_not_inherit_provider_or_storage_secrets(self):
+        auth = Authorization(
+            tier="hobby",
+            targets=["https://example.com"],
+            confirmation=CONFIRM_PHRASE,
+            app_name="Example",
+        ).validated()
+        with tempfile.TemporaryDirectory() as tmp:
+            tools_dir = Path(tmp) / "TOOLS"
+            tools_dir.mkdir()
+            (tools_dir / "vibe_headers.py").write_text("print('ok')", encoding="utf-8")
+            completed = SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            env = {
+                "OPENAI_API_KEY": "secret-provider-key",
+                "KV_REST_API_TOKEN": "secret-storage-key",
+                "VIBE_AGENT_WORKER_TOKEN": "secret-worker-key",
+                "PATH": os.environ.get("PATH", ""),
+            }
+            with patch.dict(os.environ, env, clear=True), patch.object(
+                orchestrator, "VIBEHACKING_ROOT", tmp
+            ), patch("agent.orchestrator.subprocess.run", return_value=completed) as run:
+                orchestrator._dispatch_tool("vibe_headers", {"url": "https://example.com"}, auth)
+            child_env = run.call_args.kwargs["env"]
+            self.assertNotIn("OPENAI_API_KEY", child_env)
+            self.assertNotIn("KV_REST_API_TOKEN", child_env)
+            self.assertNotIn("VIBE_AGENT_WORKER_TOKEN", child_env)
+
+
+class OutboundNetworkPolicyTests(unittest.TestCase):
+    def test_private_literal_is_blocked(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(NetworkSafetyError):
+                validate_outbound_url("http://169.254.169.254/latest/meta-data")
+
+    def test_hostname_resolving_private_is_blocked(self):
+        answer = [(2, 1, 6, "", ("127.0.0.1", 443))]
+        with patch.dict(os.environ, {}, clear=True), patch("socket.getaddrinfo", return_value=answer):
+            with self.assertRaises(NetworkSafetyError):
+                validate_outbound_url("https://public-looking.example")
+
+    def test_public_address_is_allowed(self):
+        answer = [(2, 1, 6, "", ("93.184.216.34", 443))]
+        with patch.dict(os.environ, {}, clear=True), patch("socket.getaddrinfo", return_value=answer):
+            checked = validate_outbound_url("https://example.com")
+        self.assertEqual("example.com", checked.host)
+
+    def test_mixed_public_and_private_dns_answers_are_blocked(self):
+        answers = [
+            (2, 1, 6, "", ("93.184.216.34", 443)),
+            (2, 1, 6, "", ("10.0.0.8", 443)),
+        ]
+        with patch.dict(os.environ, {}, clear=True), patch("socket.getaddrinfo", return_value=answers):
+            with self.assertRaises(NetworkSafetyError):
+                validate_outbound_url("https://mixed.example")
+
+    def test_request_is_pinned_to_validated_ip_and_keeps_host_header(self):
+        answer = [(2, 1, 6, "", ("93.184.216.34", 80))]
+        calls = {}
+
+        class FakeSocket:
+            def close(self):
+                calls["socket_closed"] = True
+
+        class FakeResponse:
+            status = 302
+
+            def read(self, limit):
+                return b"redirect"
+
+            def getheaders(self):
+                return [("Location", "http://127.0.0.1/")]
+
+        class FakeConnection:
+            def __init__(self, host, port, timeout):
+                calls["connection_host"] = host
+                self.sock = None
+
+            def request(self, method, path, headers):
+                calls.update(method=method, path=path, headers=headers)
+
+            def getresponse(self):
+                return FakeResponse()
+
+            def close(self):
+                self.sock.close()
+
+        def fake_connect(address, timeout):
+            calls["address"] = address
+            return FakeSocket()
+
+        with patch.dict(os.environ, {}, clear=True), patch("socket.getaddrinfo", return_value=answer), patch(
+            "socket.create_connection", side_effect=fake_connect
+        ), patch("agent.net_safety.http.client.HTTPConnection", FakeConnection):
+            response = request_url("http://example.com/start")
+
+        self.assertEqual(("93.184.216.34", 80), calls["address"])
+        self.assertEqual("example.com", calls["headers"]["Host"])
+        self.assertEqual(302, response.status)
+        self.assertEqual("http://127.0.0.1/", response.headers["location"])
+
+
+class ModelPolicyTests(unittest.TestCase):
+    def test_unapproved_model_is_rejected(self):
+        with patch.dict(os.environ, {"VIBE_AGENT_ALLOWED_MODELS": "approved/model"}, clear=True):
+            with self.assertRaises(OpenRouterError):
+                validate_requested_model("expensive/unapproved")
+
+    def test_configured_model_is_allowed(self):
+        with patch.dict(os.environ, {"VIBE_AGENT_ALLOWED_MODELS": "approved/model"}, clear=True):
+            self.assertEqual("approved/model", validate_requested_model("approved/model"))
+
 
 class RequestContextTests(unittest.TestCase):
     def test_cookie_context_resets(self):
@@ -113,6 +305,27 @@ class OriginGuardTests(unittest.TestCase):
         self.assertIn("request too large", error)
 
 
+class APIAccessTests(unittest.TestCase):
+    def test_scan_access_fails_closed_when_unconfigured(self):
+        handler = _ResponseHandler()
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(require_scan_access(handler, None))
+        self.assertEqual(503, handler.status)
+
+    def test_scan_api_token_is_constant_time_checked(self):
+        handler = _ResponseHandler({"X-VibeAgent-Token": "correct"})
+        with patch.dict(os.environ, {"VIBE_AGENT_API_TOKEN": "correct"}, clear=True):
+            self.assertTrue(require_scan_access(handler, None))
+
+    def test_workspace_requires_separate_token(self):
+        denied = _ResponseHandler({"X-VibeAgent-Workspace-Token": "wrong"})
+        allowed = _ResponseHandler({"X-VibeAgent-Workspace-Token": "workspace-secret"})
+        with patch.dict(os.environ, {"VIBE_AGENT_WORKSPACE_TOKEN": "workspace-secret"}, clear=True):
+            self.assertFalse(require_workspace_access(denied))
+            self.assertTrue(require_workspace_access(allowed))
+        self.assertEqual(401, denied.status)
+
+
 class OwnershipVerificationTests(unittest.TestCase):
     def test_allowlisted_https_target_can_complete_challenge(self):
         env = {
@@ -139,15 +352,9 @@ class OwnershipVerificationTests(unittest.TestCase):
             self.assertTrue(confirmed["verified"])
             self.assertTrue(target_verification.is_target_verified("https://app.example.com"))
 
-    def test_verification_rejects_non_allowlisted_target(self):
-        env = {
-            "VIBE_AGENT_WORKER_URL": "https://worker.example.com",
-            "VIBE_AGENT_WORKER_TOKEN": "x" * 32,
-            "VIBE_AGENT_WORKER_ALLOWED_HOSTS": "app.example.com",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            with self.assertRaises(target_verification.VerificationError):
-                target_verification.create_challenge("https://other.example.com")
+    def test_verification_rejects_non_https_target(self):
+        with self.assertRaises(target_verification.VerificationError):
+            target_verification.create_challenge("http://other.example.com")
 
 
 class DeploymentHeaderTests(unittest.TestCase):

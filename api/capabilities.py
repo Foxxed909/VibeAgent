@@ -37,23 +37,24 @@ class handler(BaseHTTPRequestHandler):
         native = {
             "configured": bool(caps.get("configured")),
             "can_launch": bool(caps.get("can_launch")) and verified if target else False,
-            "allowlisted": bool(caps.get("can_launch")) if target else False,
+            "allowlisted": bool(caps.get("can_launch")) and verified if target else False,
             "ownership_verified": verified,
             "native_breakagent_enabled": bool(caps.get("native_breakagent_enabled")),
             "model": caps.get("model"),
-            "message": caps.get("message"),
+            "message": caps.get("message") if verified else "Verify ownership to check worker availability.",
         }
         worker_tools = {
             "configured": bool(tool_caps.get("configured")),
             "can_launch": bool(tool_caps.get("can_launch")) and verified if target else False,
-            "allowlisted": bool(tool_caps.get("can_launch")) if target else False,
+            "allowlisted": bool(tool_caps.get("can_launch")) and verified if target else False,
             "ownership_verified": verified,
             "tool_count": len(tool_caps.get("remote_tools") or []),
-            "message": tool_caps.get("message"),
+            "message": tool_caps.get("message") if verified else "Verify ownership to check worker availability.",
         }
         body = {
             "ok": True,
             "portable": True,
+            "ownership_verified": verified,
             "worker_tools": worker_tools,
             "native_worker": native,
             "report_formats": ["json", "sarif"],
