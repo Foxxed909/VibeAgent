@@ -190,6 +190,7 @@
     const entBtn = document.querySelector('[data-tier="enterprise"]');
     const backendSelect = document.getElementById("execution_backend");
     const queuedCheckbox = document.getElementById("queued_mode");
+    let queueAvailabilityInitialized = false;
     function syncQueueMode() {
       document.getElementById("openai_api_key").required = !queuedCheckbox.checked;
       document.getElementById("openai_api_key").disabled = queuedCheckbox.checked;
@@ -237,6 +238,22 @@
         if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
         verifyBox.style.display = targets.length ? "block" : "none";
         verifyMessage.textContent = targets.length > 1 ? "Verify each listed hostname in turn." : "";
+        if (!queueAvailabilityInitialized) {
+          try {
+            const queueResponse = await fetch("/api/capabilities");
+            const queueBody = await queueResponse.json();
+            const online = Boolean(queueBody.queue && queueBody.queue.worker_online);
+            queuedCheckbox.checked = online;
+            queuedCheckbox.disabled = !online;
+            document.getElementById("queued_hint").textContent = online
+              ? "Durable worker connected. Scans can resume after refresh."
+              : "No durable worker online. Use the legacy single-request mode.";
+          } catch {
+            queuedCheckbox.checked = false;
+          }
+          queueAvailabilityInitialized = true;
+          syncQueueMode();
+        }
         backendHint.textContent = targets.length > 1
           ? "VibeHacking worker tools currently require exactly one server-approved target per job."
           : "Portable mode uses the bounded serverless tool implementations.";
@@ -251,6 +268,17 @@
           { headers: proof ? { "X-VibeAgent-Verification": proof } : {} }
         );
         const data = await res.json();
+        const queue = data.queue || {};
+        const hint = document.getElementById("queued_hint");
+        if (!queueAvailabilityInitialized) {
+          queuedCheckbox.checked = Boolean(queue.worker_online);
+          queueAvailabilityInitialized = true;
+          syncQueueMode();
+        }
+        queuedCheckbox.disabled = !queue.worker_online;
+        hint.textContent = queue.worker_online
+          ? "Worker connected. Queue mode uses worker environment credentials and supports resume/cancellation."
+          : "Durable worker is not online. Legacy one-request BYOK scans remain available.";
         const worker = data.worker_tools || {};
         targetVerified = Boolean(data.ownership_verified);
         workerToolsOption.disabled = !worker.can_launch;
@@ -266,6 +294,11 @@
           backendHint.textContent = worker.message || "VibeHacking worker tools are not available for this target.";
         }
       } catch {
+        if (!queueAvailabilityInitialized) {
+          queuedCheckbox.checked = false;
+          queueAvailabilityInitialized = true;
+          syncQueueMode();
+        }
         targetVerified = false;
         if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
         verifyBox.style.display = "none";
