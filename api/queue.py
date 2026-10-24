@@ -17,7 +17,7 @@ from agent.scope import Authorization, ScopeError, normalize_target
 from agent.target_verification import is_target_verified, is_operator_approved_proof
 from api._security import (
     apply_cors, parse_provider_keys, read_json_body,
-    require_allowed_origin, require_scan_access,
+    require_allowed_origin, require_scan_access, customer_keys_required,
 )
 
 
@@ -69,6 +69,8 @@ class handler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": "queued scans use worker environment credentials; provider_keys and cookies are not accepted"})
         if data.get("stress_multiplier") or data.get("dry_run"):
             return self._json(400, {"ok": False, "error": "queued stress mode and dry-run are not supported"})
+        if customer_keys_required():
+            return self._json(403, {"ok": False, "error": "Shared-customer scans must use personal model keys in the live browser mode; queue jobs cannot store customer keys."})
         if not require_scan_access(self, data.get("access_code")):
             return
         try:
