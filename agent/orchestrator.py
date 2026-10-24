@@ -55,6 +55,11 @@ except ImportError:
 
 VIBEHACKING_ROOT = os.environ.get("VIBEHACKING_ROOT", "")
 EventCb = Optional[Callable[[Dict[str, Any]], None]]
+
+
+class JobCancelled(Exception):
+    """Raised at safe agent checkpoints when cancellation is requested."""
+
 KNOWN_TOOL_NAMES = {tool["function"]["name"] for tool in ALL_VIBEHACKING_TOOLS}
 
 
@@ -82,6 +87,7 @@ def run_job(
     execution_backend: str = "portable",
     ownership_proofs: Optional[Dict[str, str]] = None,
     provider_keys: Optional[Dict[str, str]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
     cookie_token = set_cookie(cookie)
     provider_keys_token = set_provider_keys(provider_keys)
@@ -99,6 +105,7 @@ def run_job(
             agent_mode=agent_mode,
             execution_backend=execution_backend,
             ownership_proofs=ownership_proofs,
+            should_cancel=should_cancel,
         )
     finally:
         reset_provider_keys(provider_keys_token)
@@ -119,6 +126,7 @@ def _run_job_impl(
     agent_mode: str = "vibe",
     execution_backend: str = "portable",
     ownership_proofs: Optional[Dict[str, str]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
     auth = auth.validated()
     trial = is_valid_trial_code(auth.access_code)
@@ -196,6 +204,10 @@ def _run_job_impl(
         },
         "review": None,
     }
+
+    def check_cancel() -> None:
+        if should_cancel and should_cancel():
+            raise JobCancelled("assessment cancellation requested")
 
     def emit(kind: str, **kwargs: Any) -> None:
         ev = {"type": kind, **kwargs}
@@ -299,8 +311,10 @@ def _run_job_impl(
     forced_tools = get_forced_tools(agent_mode, force_api_finder=profile.force_api_finder)
 
     for target in auth.targets:
+        check_cancel()
         base = target if "://" in target else f"https://{target}"
         for tname in forced_tools:
+            check_cancel()
             args: Dict[str, Any] = {"url": base}
             if tname == "api_finder":
                 args["max_paths"] = profile.max_paths_per_tool
@@ -341,6 +355,7 @@ def _run_job_impl(
     stagnant_rounds = 0
 
     for round_i in range(profile.max_rounds):
+        check_cancel()
         if len(report["tool_calls"]) >= profile.max_tool_calls:
             report["loop"]["stop_reason"] = "tool_budget_reached"
             break
@@ -400,6 +415,7 @@ def _run_job_impl(
 
         calls_executed_this_round = 0
         for tc in tool_calls:
+            check_cancel()
             if not isinstance(tc, dict):
                 report["errors"].append("Model returned an invalid tool call object.")
                 continue
@@ -531,6 +547,7 @@ def _run_job_impl(
             report["errors"].append(f"Independent review unavailable: {exc}")
             emit("error", text="Independent review unavailable; continuing with collected evidence.")
 
+    check_cancel()
     if profile.require_final_report:
         messages.append({
             "role": "user",
