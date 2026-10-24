@@ -30,6 +30,7 @@ from api._security import (
     origin_is_allowed,
     read_json_body,
     require_scan_access,
+    require_operator_scan_access,
     require_workspace_access,
     parse_provider_keys,
 )
@@ -477,6 +478,18 @@ class APIAccessTests(unittest.TestCase):
         with patch.dict(os.environ, {"VIBE_AGENT_API_TOKEN": "correct"}, clear=True):
             self.assertTrue(require_scan_access(handler, None))
 
+    def test_operator_approval_requires_strong_private_token_not_an_invite(self):
+        invited = _ResponseHandler()
+        operator = _ResponseHandler({"X-VibeAgent-Token": "t" * 40})
+        short_token = _ResponseHandler({"X-VibeAgent-Token": "short"})
+        with patch.dict(os.environ, {"VIBE_AGENT_API_TOKEN": "t" * 40}, clear=True):
+            self.assertFalse(require_operator_scan_access(invited))
+            self.assertEqual(401, invited.status)
+            self.assertTrue(require_operator_scan_access(operator))
+        with patch.dict(os.environ, {"VIBE_AGENT_API_TOKEN": "short"}, clear=True):
+            self.assertFalse(require_operator_scan_access(short_token))
+            self.assertEqual(503, short_token.status)
+
     def test_workspace_requires_separate_token(self):
         denied = _ResponseHandler({"X-VibeAgent-Workspace-Token": "wrong"})
         allowed = _ResponseHandler({"X-VibeAgent-Workspace-Token": "workspace-secret"})
@@ -487,6 +500,48 @@ class APIAccessTests(unittest.TestCase):
 
 
 class OwnershipVerificationTests(unittest.TestCase):
+    def test_operator_approved_real_host_proof_is_exact_and_revocable(self):
+        config = {
+            "VIBE_AGENT_VERIFICATION_SECRET": "s" * 48,
+            "VIBE_AGENT_OWNER_APPROVED_HOSTS": "app.example.com,portal.example.com",
+        }
+        with patch.dict(os.environ, config, clear=True), patch.object(
+            target_verification, "_fetch_verification"
+        ) as fetch:
+            approval = target_verification.approve_operator_target("https://app.example.com")
+            fetch.assert_not_called()
+            self.assertEqual("operator-approved", approval["mode"])
+            self.assertLessEqual(approval["expires_in"], 3600)
+            self.assertTrue(target_verification.is_target_verified(
+                "https://app.example.com", approval["proof"]
+            ))
+            self.assertFalse(target_verification.is_target_verified(
+                "https://sub.app.example.com", approval["proof"]
+            ))
+            self.assertFalse(target_verification.is_target_verified(
+                "https://portal.example.com", approval["proof"]
+            ))
+            with self.assertRaises(target_verification.VerificationError):
+                target_verification.approve_operator_target("https://unapproved.example.com")
+            with self.assertRaises(target_verification.VerificationError):
+                target_verification.approve_operator_target("http://app.example.com")
+            with self.assertRaises(target_verification.VerificationError):
+                target_verification.approve_operator_target("https://app.example.com:8443")
+            with self.assertRaises(target_verification.VerificationError):
+                target_verification.approve_operator_target("https://*.example.com")
+            os.environ.pop("VIBE_AGENT_OWNER_APPROVED_HOSTS", None)
+            self.assertFalse(target_verification.is_target_verified(
+                "https://app.example.com", approval["proof"]
+            ))
+
+    def test_operator_approval_requires_verification_secret_and_allowlist(self):
+        with patch.dict(os.environ, {"VIBE_AGENT_OWNER_APPROVED_HOSTS": "app.example.com"}, clear=True):
+            with self.assertRaises(target_verification.VerificationError):
+                target_verification.approve_operator_target("https://app.example.com")
+        with patch.dict(os.environ, {"VIBE_AGENT_VERIFICATION_SECRET": "s" * 40}, clear=True):
+            with self.assertRaises(target_verification.VerificationError):
+                target_verification.approve_operator_target("https://app.example.com")
+
     def test_allowlisted_https_target_can_complete_challenge(self):
         env = {
             "VIBE_AGENT_WORKER_URL": "https://worker.example.com",
