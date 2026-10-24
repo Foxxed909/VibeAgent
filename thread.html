@@ -402,6 +402,9 @@
         if (data.ok && data.report) {
           sessionStorage.setItem('vibeagent_last_report', JSON.stringify(data.report));
           renderReport(data.report);
+          if (data.report.queue_mode && (data.report.status === 'queued' || data.report.status === 'running')) {
+            startQueue();
+          }
         }
       } catch {}
     }
