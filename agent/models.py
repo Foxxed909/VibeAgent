@@ -102,7 +102,12 @@ def chat(
     # a Vercel AI Gateway model. OpenRouter uses :free, NVIDIA NIM does not.
     # Never downgrade :free to a paid OpenRouter endpoint implicitly.
     if selected == NEMOTRON_OPENROUTER_FREE_MODEL:
-        if current_provider_key("openrouter") or os.environ.get("OPENROUTER_API_KEY", "").strip():
+        # An explicitly submitted key takes priority over ambient credentials.
+        # Otherwise prefer OpenRouter free, and then NVIDIA's direct API.
+        openrouter_requested = bool(current_provider_key("openrouter"))
+        nvidia_requested = bool(current_provider_key("nvidia"))
+        openrouter_configured = bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
+        if openrouter_requested or (not nvidia_requested and openrouter_configured):
             return _openrouter_chat(
                 messages, model=selected, temperature=temperature,
                 max_tokens=max_tokens, tools=tools,
