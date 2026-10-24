@@ -55,10 +55,29 @@ class BrowserContractTests(unittest.TestCase):
         self.assertNotIn("fetch('/api/scan',", content)
         self.assertIn("No retry was submitted", content)
 
+    def test_self_host_clone_uses_own_project_configuration(self):
+        page = (ROOT / "deploy.html").read_text(encoding="utf-8")
+        self.assertIn("https://vercel.com/new/clone", page)
+        self.assertIn("OPENROUTER_API_KEY", page)
+        self.assertIn("NVIDIA_API_KEY", page)
+        self.assertIn("OPENAI_API_KEY", page)
+        self.assertIn("window.crypto.getRandomValues", page)
+        self.assertIn("envDefaults", page)
+        self.assertIn("VIBE_AGENT_REQUIRE_OWNERSHIP", page)
+
+    def test_self_host_access_token_only_in_header(self):
+        scan = (ROOT / "scan.html").read_text(encoding="utf-8")
+        thread = (ROOT / "thread.html").read_text(encoding="utf-8")
+        self.assertIn('id="scan_api_token"', scan)
+        self.assertIn("delete payload.scan_api_token;", thread)
+        self.assertLess(thread.index("delete payload.scan_api_token;"),
+                        thread.index("let requestBody = JSON.stringify(payload);"))
+        self.assertIn("'X-VibeAgent-Token': scanApiToken", thread)
+
     def test_browser_inline_scripts_have_valid_javascript(self):
         if not shutil.which("node"):
             self.skipTest("Node.js unavailable")
-        for name in ("index.html", "app.html", "scan.html", "thread.html"):
+        for name in ("index.html", "app.html", "scan.html", "thread.html", "deploy.html"):
             with self.subTest(page=name):
                 parser = InlineScripts()
                 parser.feed((ROOT / name).read_text(encoding="utf-8"))
