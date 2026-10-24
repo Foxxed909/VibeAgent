@@ -21,6 +21,17 @@ PENDING = "vibeagent:queue:pending"
 PROCESSING = "vibeagent:queue:processing"
 EVENT_LIMIT = 800
 TERMINAL = {"completed", "partial", "failed", "cancelled", "dry_run_ok"}
+WORKER_ALIVE = "vibeagent:queue:worker:alive"
+
+
+def touch_worker(worker_id: str) -> None:
+    require_queue()
+    job_store._kv_command("SET", WORKER_ALIVE, worker_id, "EX", 65)
+
+
+def worker_online() -> bool:
+    require_queue()
+    return bool(job_store._kv_command("GET", WORKER_ALIVE))
 
 
 def _key(kind: str, job_id: str) -> str:
