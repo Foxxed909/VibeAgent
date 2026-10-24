@@ -175,6 +175,78 @@ Proof receipts are scoped to one exact hostname, expire automatically, and are h
 
 Portable probes accept HTTP(S) URLs only, reject embedded credentials, resolve each destination immediately before use, block non-global address classes, and refuse redirects. This keeps an exact authorized hostname from turning into a redirect-based or DNS-based internal-network request. A local-only scanner can opt into private targets with `VIBE_AGENT_ALLOW_PRIVATE_TARGETS=1`.
 
+## Durable background scan queue (opt-in)
+
+The app now has two independent scan transports:
+
+- **Durable queued mode**: asynchronous, resumable progress and safe cancellation
+  checkpoints, backed by a separately hosted continuous worker and Redis/Upstash.
+  No browser API keys, cookies, invite codes or raw cancellation tokens are
+  persisted in queue task records.
+- **Legacy live stream**: synchronous request-scoped assessments with BYOK;
+  still subject to Vercel function timeouts and not resumable.
+
+Queued API workflow:
+
+1. POST /api/queue to submit (HTTP 202 returns job_id and a private cancel token).
+2. GET /api/events?id=JOB_ID&after=0-0 to replay progress with cursor paging.
+3. GET /api/job?id=JOB_ID for a completed report.
+4. POST /api/queue with action=cancel, job_id and cancel_token to request a
+   cooperative cancellation.
+
+Access is checked before enqueueing; ownership is checked at submission and
+again by the worker. Job IDs are high-entropy bearer URL capabilities, so treat
+job links and cancellation tokens as private.
+
+### Configure Vercel (control plane)
+
+Configure VIBE_AGENT_QUEUE_ENABLED=1, KV_REST_API_URL, KV_REST_API_TOKEN,
+VIBE_AGENT_VERIFICATION_SECRET, and the existing access configuration.
+Do not place credentials in the repository. The signing secret must be the
+same value on Vercel and on the independent worker. The queue is disabled by
+default. Queue mode is exposed in the scan form only when a worker heartbeat
+is visible; submissions are rejected if no worker is online.
+
+### Deploy the continuous background worker
+
+Use a VM/container host or the optional Render worker blueprint at render.yaml.
+Vercel request handlers cannot host this long-lived process. Set the same
+KV_REST_API_URL, KV_REST_API_TOKEN and VIBE_AGENT_VERIFICATION_SECRET there, plus
+worker-owned model-provider credentials such as OPENAI_API_KEY.
+
+    export VIBE_AGENT_QUEUE_ENABLED=1
+    export KV_REST_API_URL='https://example.upstash.io'
+    export KV_REST_API_TOKEN='your-private-token'
+    export VIBE_AGENT_VERIFICATION_SECRET='shared-strong-secret'
+    export OPENAI_API_KEY='worker-api-key'
+    python -m agent.queue_worker
+
+Or build the dedicated portable worker image:
+
+    docker build -f Dockerfile.worker -t vibeagent-worker .
+    docker run --env-file /secure/path/worker.env vibeagent-worker
+
+The daemon renews its Redis lease and advertises liveness with a short TTL.
+Worker crashes produce failed orphan jobs, not automatic replays of potentially
+state-changing security tests. Events expire with the job TTL (24 hours by
+default). For a controlled one-job worker invocation, use --once.
+
+For the worker-tools backend, also configure VIBE_AGENT_WORKER_URL,
+VIBE_AGENT_WORKER_TOKEN and VIBE_AGENT_WORKER_ALLOWED_HOSTS on the background
+worker. The stock Docker image contains only portable agent code; native
+VibeHacking scripts need their own installation.
+
+### Queue limitations
+
+- BYOK provider keys, cookies, load/stress mode and dry-runs are rejected in
+  queue mode. Use provider keys configured on the long-lived worker.
+- Cancellation is cooperative between agent operations; in-flight model calls
+  or native worker tasks may not be immediately interruptible.
+- Cursor-based event replay is durable, but full execution resumption from a
+  fine-grained model checkpoint is not implemented. Orphans are failed safely.
+- Organization RBAC, billing, automatic scan scheduling and browser Playwright
+  end-to-end tests remain future enhancements.
+
 ## Persistent VibeHacking worker
 
 Portable mode is the default. The recommended native path is **worker-tools**:

@@ -1,0 +1,19 @@
+# Optional Render background worker blueprint; it does not deploy itself.
+services:
+  - type: worker
+    name: vibeagent-scan-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile.worker
+    envVars:
+      - key: VIBE_AGENT_QUEUE_ENABLED
+        value: "1"
+      - key: VIBE_AGENT_REQUIRE_OWNERSHIP
+        value: "1"
+      - key: KV_REST_API_URL
+        sync: false
+      - key: KV_REST_API_TOKEN
+        sync: false
+      - key: VIBE_AGENT_VERIFICATION_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
