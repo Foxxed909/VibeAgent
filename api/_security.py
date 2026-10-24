@@ -67,6 +67,21 @@ def _write_json_error(handler, code: int, message: str) -> None:
     handler.wfile.write(payload)
 
 
+def require_operator_scan_access(handler) -> bool:
+    """Require a strong deployment-owner token; invites cannot approve hosts."""
+    expected = (os.environ.get("VIBE_AGENT_API_TOKEN") or "").strip()
+    supplied = _header_token(handler, "X-VibeAgent-Token")
+    if len(expected) >= 32 and supplied and hmac.compare_digest(expected, supplied):
+        return True
+    _write_json_error(
+        handler,
+        401 if len(expected) >= 32 else 503,
+        "private operator scan token required" if len(expected) >= 32
+        else "strong operator scan token is not configured",
+    )
+    return False
+
+
 def require_scan_access(handler, access_code: Optional[str]) -> bool:
     """Fail closed for paid/model-backed scans unless an operator configured access."""
     api_token = (os.environ.get("VIBE_AGENT_API_TOKEN") or "").strip()
