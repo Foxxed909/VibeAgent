@@ -105,6 +105,8 @@
       <p class="hint" id="backend-hint">Portable mode uses the bounded serverless tool implementations.</p>
       <div class="verify-box" id="verify-box">
         <strong>Verify target ownership</strong>
+        <label for="verify-target">Select hostname to verify</label>
+        <select id="verify-target" aria-label="Hostname to verify"></select>
         <p id="verify-message" style="margin-top:6px;color:var(--text-muted)">
           Live scans require proof that you control this exact hostname.
         </p>
@@ -189,6 +191,8 @@
     const verifyToken = document.getElementById("verify-token");
     let capabilityTimer = null;
     let targetVerified = false;
+    const verifyTargetSelect = document.getElementById("verify-target");
+    const confirmedTargets = new Set(JSON.parse(sessionStorage.getItem("vibeagent_verified_targets") || "[]"));
     let ownershipProofs = (() => {
       try { return JSON.parse(sessionStorage.getItem("vibeagent_ownership_proofs") || "{}"); }
       catch { return {}; }
@@ -210,9 +214,13 @@
       const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
       workerToolsOption.disabled = true;
       targetVerified = false;
+      const previous = verifyTargetSelect.value;
+      verifyTargetSelect.replaceChildren(...targets.map(t => new Option(t, t)));
+      if (targets.includes(previous)) verifyTargetSelect.value = previous;
       if (targets.length !== 1) {
         if (backendSelect.value === "worker-tools") backendSelect.value = "portable";
-        verifyBox.style.display = "none";
+        verifyBox.style.display = targets.length ? "block" : "none";
+        verifyMessage.textContent = targets.length > 1 ? "Verify each listed hostname in turn." : "";
         backendHint.textContent = targets.length > 1
           ? "VibeHacking worker tools currently require exactly one server-approved target per job."
           : "Portable mode uses the bounded serverless tool implementations.";
@@ -299,6 +307,11 @@
         : "Portable mode uses the bounded serverless tool implementations.";
     };
     document.getElementById("targets").addEventListener("input", queueCapabilityRefresh);
+    verifyTargetSelect.addEventListener("change", () => {
+      verifyChallenge.style.display = "none";
+      verifyMessage.textContent = confirmedTargets.has(verifyTargetSelect.value)
+        ? "This hostname has been verified in this browser session." : "Create a challenge for this hostname.";
+    });
 
     async function verificationRequest(action) {
       const targets = document.getElementById("targets").value.split("\n").map(s => s.trim()).filter(Boolean);
