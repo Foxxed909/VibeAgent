@@ -38,7 +38,11 @@ def _b64url_encode(value: bytes) -> str:
 
 
 def _b64url_decode(value: str) -> bytes:
-    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    """Reject non-canonical encodings, including altered unused trailing bits."""
+    raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    if not value or _b64url_encode(raw) != value:
+        raise ValueError("non-canonical base64url token")
+    return raw
 
 
 def _signed_token(kind: str, host: str, ttl: int) -> str:
