@@ -163,6 +163,33 @@ def read_json_body(handler) -> tuple[Optional[bytes], Optional[str], int]:
     return raw, None, 200
 
 
+def customer_keys_required() -> bool:
+    """Shared-service policy; reject silent use of deployment-owner model keys."""
+    return (os.environ.get("VIBE_AGENT_REQUIRE_CUSTOMER_KEYS") or "").strip().lower() in {
+        "1", "true", "yes"
+    }
+
+
+def personal_key_error(model: Optional[str], provider_keys: Optional[dict]) -> Optional[str]:
+    """Customer API keys are per-request. No implicit billing to server owner."""
+    keys = provider_keys or {}
+    name = (model or "").strip()
+    if name == "nvidia/nemotron-3-ultra-550b-a55b:free":
+        if keys.get("openrouter") or keys.get("nvidia"):
+            return None
+        return "Add your own OpenRouter or NVIDIA key in Settings > Keys."
+    if name == "nvidia/nemotron-3-ultra-550b-a55b":
+        return None if keys.get("nvidia") else "Add your own NVIDIA key in Settings > Keys."
+    if name.startswith("google/"):
+        return None if keys.get("google") else "Add your own Google API key in Settings > Keys."
+    if name.startswith("gpt-") or name.startswith("openai/"):
+        # Model router expects plain gpt- IDs for direct provider-key use.
+        if name.startswith("openai/"):
+            return "Choose a direct OpenAI model for per-customer billing."
+        return None if keys.get("openai") else "Add your own OpenAI key in Settings > Keys."
+    return "This model does not have an isolated customer-key route. Choose OpenAI or Nemotron."
+
+
 def parse_provider_keys(data: dict) -> tuple[Optional[dict[str, str]], Optional[str]]:
     raw = data.get("provider_keys", {})
     if raw is None:
