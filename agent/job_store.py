@@ -57,6 +57,10 @@ def _kv_command(*args: Any) -> Any:
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        raise RuntimeError("invalid response from Redis REST storage")
+    if data.get("error"):
+        raise RuntimeError("Redis storage operation failed")
     return data.get("result")
 
 
