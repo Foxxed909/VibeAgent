@@ -73,6 +73,16 @@ class FakeRedis:
                 self.lists[processing].insert(0, job_id)
                 self.values[queue_store._key("lease", job_id)] = worker_id
                 return job_id
+            if "LPUSH" in script and "KEYS[3]" in script:
+                _, _, _, lease_key, report_key, index_key, worker_id, payload, ttl, job_id = args
+                if self.values.get(lease_key) != worker_id:
+                    return 0
+                self.values[report_key] = payload
+                if job_id in self.lists[index_key]:
+                    self.lists[index_key].remove(job_id)
+                self.lists[index_key].insert(0, job_id)
+                self.lists[index_key] = self.lists[index_key][:100]
+                return 1
             _, _, _, lease_key, worker_id, *remaining = args
             if self.values.get(lease_key) != worker_id:
                 return 0
@@ -128,6 +138,17 @@ class DurableQueueTests(unittest.TestCase):
         self.assertFalse(queue_store.heartbeat(first, "wrong-owner"))
         queue_store.complete_claim(first, "worker-a")
         self.assertNotIn(first, self.redis.lists[queue_store.PROCESSING])
+
+    def test_stale_worker_cannot_overwrite_terminal_report(self):
+        jid, _ = self.enqueue()
+        self.assertEqual(jid, queue_store.claim("worker-a"))
+        report = job_store.load_job(jid)
+        report["status"] = "completed"
+        self.assertTrue(queue_store.save_report_if_owned(jid, "worker-a", report))
+        self.redis.values.pop(queue_store._key("lease", jid))
+        stale = dict(report, status="partial")
+        self.assertFalse(queue_store.save_report_if_owned(jid, "worker-a", stale))
+        self.assertEqual("completed", job_store.load_job(jid)["status"])
 
     def test_event_cursors_resume_without_replaying_old_events(self):
         jid, _ = self.enqueue()
