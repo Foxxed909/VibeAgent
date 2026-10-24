@@ -202,7 +202,7 @@
           setFindingSummary(ev.report);
           setModel(ev.report.model, ev.report.provider, ev.report.reasoning_effort);
           statusEl.textContent = ev.report.status || 'completed';
-          statusEl.className = 'badge';
+          statusEl.className = 'badge' + (ev.report.status === 'completed' || ev.report.status === 'dry_run_ok' ? '' : ' error');
           if (ev.report.report_text) row('agent', currentAgent + ' · final report', ev.report.report_text);
         } else {
           statusEl.textContent = 'error';
