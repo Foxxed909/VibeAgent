@@ -16,8 +16,6 @@ from dataclasses import dataclass
 from typing import List, Optional
 from urllib.parse import urlsplit
 
-CONFIRM_PHRASE = "I OWN OR AM AUTHORIZED TO TEST THESE TARGETS"
-
 # Optional private invite code. Store only its SHA-256 digest server-side.
 INVITE_CODE_SHA256_ENV = "VIBE_AGENT_INVITE_CODE_SHA256"
 LEGACY_TRIAL_CODE_SHA256_ENV = "VIBE_AGENT_TRIAL_CODE_SHA256"
@@ -27,7 +25,7 @@ LEGACY_TRIAL_CODE_SHA256_ENV = "VIBE_AGENT_TRIAL_CODE_SHA256"
 class Authorization:
     tier: str  # "hobby" | "enterprise"
     targets: List[str]
-    confirmation: str
+    confirmation: str = ""
     app_name: Optional[str] = None
     company_name: Optional[str] = None
     contact_email: Optional[str] = None
@@ -40,8 +38,6 @@ class Authorization:
         self.tier = (self.tier or "").strip().lower()
         if self.tier not in {"hobby", "enterprise"}:
             raise ScopeError("Tier must be hobby or enterprise.")
-        if not isinstance(self.confirmation, str) or self.confirmation.strip() != CONFIRM_PHRASE:
-            raise ScopeError("Confirmation phrase mismatch. Scan refused.")
         if not isinstance(self.targets, list) or not self.targets:
             raise ScopeError("At least one exact target is required.")
         if len(self.targets) > 10:
@@ -51,7 +47,6 @@ class Authorization:
         if self.access_code and not trial:
             raise ScopeError("Invalid private invite code.")
         if trial:
-            # Trial always runs as Hobby scope rules
             self.tier = "hobby"
 
         normalized = []
@@ -119,7 +114,6 @@ def normalize_target(raw: str) -> str:
             return ""
         return raw.rstrip("/")
 
-    # CIDR is accepted for Enterprise scope declarations only; Hobby rejects it.
     try:
         ipaddress.ip_network(raw, strict=False)
         return raw
@@ -137,7 +131,6 @@ def normalize_target(raw: str) -> str:
 
 
 def is_hobby_allowed(target: str) -> bool:
-    """Exact host/URL only. Exact Vercel app hostnames are allowed."""
     t = target.lower()
     if "*" in t or "?" in t:
         return False
