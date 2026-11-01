@@ -36,9 +36,22 @@ def _kv_command(*args):
     return payload.get("result")
 
 
+def _already_registered(digest: str) -> bool:
+    """Return True if this email digest is already in the waitlist index."""
+    try:
+        result = _kv_command("SISMEMBER", "vibeagent:waitlist:index", digest)
+        return bool(result)
+    except Exception:
+        return False
+
+
 def _save_waitlist(email: str, tier: str) -> None:
     normalized = email.strip().lower()
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    if _already_registered(digest):
+        return  # idempotent — no duplicate KV write
+
     record = json.dumps({
         "email": normalized,
         "tier": tier,
@@ -52,6 +65,11 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not require_allowed_origin(self):
             return
+
+        ct = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ct and ct != "application/json":
+            return self._json(415, {"ok": False, "error": "Content-Type must be application/json"})
+
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
