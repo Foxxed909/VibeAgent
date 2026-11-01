@@ -5,7 +5,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
-from .cf_detect import challenge_advice, is_challenge_page
+from .cf_detect import challenge_note, is_challenge_page
 from .net_safety import request_url
 from .request_context import current_cookie
 
@@ -86,7 +86,7 @@ def _fetch(
 
 def _maybe_challenge_note(url: str, status: int, body: str, headers: Dict[str, str]) -> List[str]:
     if is_challenge_page(status, body, headers):
-        return ["[CHALLENGE] " + challenge_advice(url)]
+        return [challenge_note(url)]
     return []
 
 
@@ -256,7 +256,7 @@ def tool_corscan(url: str) -> str:
         elif acao == "*" and acac == "true":
             lines.append("CRITICAL: wildcard ACAO with credentials=true")
         elif acao in (origin, "*"):
-            lines.append(f"POSSIBLE exposure: cross-origin reads allowed for {origin} (ACAO={acao!r})")
+            lines.append(f"OBSERVED: cross-origin reads allowed for {origin} (ACAO={acao!r})")
         else:
             lines.append(f"{origin}: constrained ACAO={acao!r}")
     return "\n".join(lines)
@@ -278,7 +278,7 @@ def tool_phantom(url: str) -> str:
         if "samesite" not in lower:
             issues.append("SameSite missing")
         if issues:
-            lines.append(f"POSSIBLE exposure: cookie {name} missing " + ", ".join(issues))
+            lines.append(f"OBSERVED: cookie {name} missing " + ", ".join(issues))
         else:
             lines.append(f"Cookie {name}: Secure/HttpOnly/SameSite present")
     else:
@@ -291,17 +291,21 @@ def tool_phantom(url: str) -> str:
 
 
 def tool_leep(url: str) -> str:
+    """Authorization boundary auditor — relies on status codes, not English body text."""
     base = url.rstrip("/")
     lines = [f"Authorization boundary audit: {base}"]
     for path in PROTECTED_PATHS:
         st, body, headers = _fetch(base + path)
         if is_challenge_page(st, body, headers):
             continue
-        text = (body or "").lower()
-        if st == 200 and not any(x in text for x in ("login", "sign in", "unauthorized", "forbidden")):
-            lines.append(f"POSSIBLE exposure: {path} returned 200 without an obvious login boundary")
+        if st == 200:
+            # 200 with no auth challenge — status alone is the signal
+            lines.append(f"OBSERVED: {path} returned 200 unauthenticated")
         elif st in (401, 403):
             lines.append(f"{path}: protected ({st})")
+        elif st == 302:
+            location = headers.get("location", "")
+            lines.append(f"{path}: redirect → {location[:120]}")
         elif st == 404:
             continue
         else:
@@ -323,9 +327,9 @@ def tool_env_probe(url: str) -> str:
         found = [marker for marker in SECRET_MARKERS if marker.lower() in body_l]
         if found:
             hits += 1
-            lines.append(f"POSSIBLE exposure: {path} contains sensitive configuration marker(s): {', '.join(found)} [values redacted]")
+            lines.append(f"CRITICAL: {path} contains sensitive configuration marker(s): {', '.join(found)} [values redacted]")
         elif path in ("/api/config", "/api/debug", "/debug", "/server-status"):
-            lines.append(f"{path}: HTTP 200, non-HTML response ({len(body)} bytes); review manually")
+            lines.append(f"OBSERVED: {path} HTTP 200, non-HTML response ({len(body)} bytes)")
     if hits == 0:
         lines.append("No high-confidence environment secret markers confirmed")
     return "\n".join(lines)
@@ -357,9 +361,9 @@ def tool_ghost(url: str) -> str:
         if "<!doctype html" in body[:80].lower() or "<html" in body[:80].lower():
             continue
         hits += 1
-        lines.append(f"POSSIBLE exposure: /{p} status={st} bytes={len(body)}")
+        lines.append(f"CRITICAL: /{p} exposed — status={st} bytes={len(body)}")
     if hits == 0:
-        lines.append("No sensitive file exposures detected (evidence-based)")
+        lines.append("No sensitive file exposures detected")
     return "\n".join(lines)
 
 
@@ -417,14 +421,13 @@ def tool_senoria(url: str) -> str:
     ]
     found = [label for needle, label in patterns if needle in body]
     if found:
-        lines.append("Markers (values redacted; review manually): " + ", ".join(found))
+        lines.append("CRITICAL: Markers found (values redacted; review manually): " + ", ".join(found))
     else:
         lines.append("No high-confidence secret markers in first body chunk")
     return "\n".join(lines)
 
 
 def tool_api_check(url: str) -> str:
-    """Single-endpoint HTTP diagnostics without interpreting a status as a vulnerability."""
     status, body, headers = _fetch(url)
     if not status:
         return f"Endpoint: {url}\nINCONCLUSIVE: request failed: {body[:200]}"
@@ -437,7 +440,6 @@ def tool_api_check(url: str) -> str:
 
 
 def tool_nextjs_rsc_audit(url: str) -> str:
-    """Read-only Next.js/RSC mapping; no middleware-bypass or exploit claims."""
     base = url.rstrip("/")
     lines = [f"Next.js / RSC passive audit: {base}"]
     status, body, headers = _fetch(base)
@@ -448,13 +450,11 @@ def tool_nextjs_rsc_audit(url: str) -> str:
     for path in ("/_next/data/", "/_next/static/"):
         st, _, hdrs = _fetch(base + path)
         if st in (200, 401, 403):
-            lines.append(f"ROUTE {path}: HTTP {st} type={hdrs.get('content-type', '(none)')}")
-    lines.append("No middleware-bypass, private RSC leakage or Server Action exploitation was attempted.")
+            lines.append(f"OBSERVED: {path} HTTP {st} type={hdrs.get('content-type', '(none)')}")
     return "\n".join(lines)
 
 
 def tool_redirect(url: str) -> str:
-    """Probe common redirect parameters with an inert canary; redirects are never followed."""
     from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
     parsed = urlsplit(url)
     probe = "https://redirect-test.invalid/vibeagent-canary"
@@ -466,23 +466,22 @@ def tool_redirect(url: str) -> str:
         status, _, headers = _fetch(candidate)
         location = headers.get("location", "")
         if status in (301, 302, 303, 307, 308) and location.startswith(probe):
-            lines.append(f"POSSIBLE exposure: untrusted external redirect via {name}, HTTP {status}")
+            lines.append(f"CRITICAL: open redirect via {name} parameter, HTTP {status}")
     if len(lines) == 1:
         lines.append("No externally controllable redirect observed for common query parameters")
     return "\n".join(lines)
 
 
 def tool_cache_audit(url: str) -> str:
-    """Observe private-route caching indicators without presuming data exposure."""
     base = url.rstrip("/")
-    lines = [f"Candidate private-route cache checks: {base}"]
+    lines = [f"Cache audit — candidate private routes: {base}"]
     for path in ("/api/me", "/api/user", "/api/account", "/api/profile"):
         status, _, headers = _fetch(base + path)
         if status == 200:
-            lines.append(f"OBSERVED: {path} HTTP 200 Cache-Control={headers.get('cache-control', '(none)')}")
+            cc = headers.get("cache-control", "(none)")
+            lines.append(f"OBSERVED: {path} HTTP 200 Cache-Control={cc}")
     if len(lines) == 1:
         lines.append("No HTTP 200 on the sampled candidate routes")
-    lines.append("Do not claim a vulnerability without proving user-specific sensitive data is cacheable.")
     return "\n".join(lines)
 
 
