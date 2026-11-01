@@ -64,34 +64,70 @@ TOOL_META = {
     },
 }
 
-SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+SEVERITY_RANK = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
+
+# Headers whose absence is genuinely high-impact
+_HIGH_IMPACT_MISSING = {
+    "strict-transport-security",
+    "content-security-policy",
+}
+
+# CORS wildcard without credentials is still an observed misconfiguration
+_CORS_WILDCARD_PATTERNS = ("acao: *", "access-control-allow-origin: *")
 
 
 def _normalize_severity(tool: str, line: str) -> str:
     text = line.lower()
+
+    # Credentialed CORS reflection — confirmed high
     if tool == "corscan" and "credentials=true" in text and ("reflected" in text or "wildcard" in text):
         return "high"
+
+    # CORS wildcard (no credentials) — medium observed misconfiguration
+    if tool == "corscan" and any(p in text for p in _CORS_WILDCARD_PATTERNS):
+        return "medium"
+
     if tool == "vibe_headers" and "missing:" in text:
-        if "strict-transport-security" in text or "content-security-policy" in text:
-            return "medium"
-        return "low"
+        header_name = text.split("missing:")[-1].strip().split()[0].rstrip("]").lower()
+        if header_name in _HIGH_IMPACT_MISSING:
+            return "high"
+        return "medium"
+
+    # CRITICAL in tool output means critical — not silently downgraded
     if "critical" in text:
-        return "high"
+        return "critical"
+
+    if "observed:" in text:
+        return "medium"
+
     if "possible exposure" in text:
         return "high" if tool in {"leep", "env_probe", "ghost", "senoria"} else "medium"
+
     return "info"
 
 
 def _validation_status(tool: str, line: str) -> str:
     text = line.lower()
+
     if tool == "corscan" and "credentials=true" in text and ("reflected" in text or "wildcard" in text):
         return "confirmed"
+
+    # CORS wildcard — observable without credentials, mark observed not unconfirmed
+    if tool == "corscan" and any(p in text for p in _CORS_WILDCARD_PATTERNS):
+        return "observed"
+
     if tool == "vibe_headers" and "missing:" in text:
         return "observed"
-    if "possible exposure" in text:
-        return "unconfirmed"
+
+    if "observed:" in text:
+        return "observed"
+
     if "critical" in text:
         return "observed"
+
+    if "possible exposure" in text:
+        return "unconfirmed"
+
     return "informational"
 
 
@@ -99,11 +135,14 @@ def _title(tool: str, line: str) -> str:
     meta = TOOL_META.get(tool, {})
     base = meta.get("title") or f"{tool} finding"
     if tool == "vibe_headers":
-        match = re.search(r"MISSING:\s*([^\s]+)", line, re.IGNORECASE)
+        match = re.search(r"MISSING:\s*([^\s\]]+)", line, re.IGNORECASE)
         if match:
             return f"Missing security header: {match.group(1)}"
-    if tool == "corscan" and "credentials=true" in line.lower():
-        return "Credentialed CORS policy accepts an untrusted origin"
+    if tool == "corscan":
+        if "credentials=true" in line.lower():
+            return "Credentialed CORS policy accepts an untrusted origin"
+        if any(p in line.lower() for p in _CORS_WILDCARD_PATTERNS):
+            return "CORS wildcard allows any origin"
     return base
 
 
