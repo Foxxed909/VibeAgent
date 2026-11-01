@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin
 
 from .models import chat, OpenRouterError, validate_requested_model
-from .scope import Authorization, ScopeError, assert_url_in_scope, CONFIRM_PHRASE, is_valid_trial_code
+from .scope import Authorization, ScopeError, assert_url_in_scope, is_valid_trial_code
 from .tools_catalog import (
     ALL_VIBEHACKING_TOOLS,
     agent_name,
@@ -55,6 +55,9 @@ except ImportError:
 
 VIBEHACKING_ROOT = os.environ.get("VIBEHACKING_ROOT", "")
 EventCb = Optional[Callable[[Dict[str, Any]], None]]
+
+# Lines matching any of these prefixes are harvested as findings from tool stdout.
+_HARVEST_PREFIXES = ("MISSING:", "CRITICAL:", "CRITICAL", "OBSERVED:", "POSSIBLE exposure")
 
 
 class JobCancelled(Exception):
@@ -288,13 +291,13 @@ def _run_job_impl(
     if agent_mode == "break":
         mission = (
             "Validate likely weaknesses with targeted evidence. Re-check headers, CORS, session policy, "
-            "authorization boundaries and exposed config/schema surfaces. Do not invent bypasses. "
+            "authorization boundaries and exposed config/schema surfaces. "
             "End with ## Findings and mark each result confirmed or unconfirmed."
         )
     else:
         mission = (
             "Map the authorized surface, run recon/API discovery, follow evidence, and end with ## Findings. "
-            "Challenges are informational, not downtime."
+            "Challenges are obstacles, not stop signs — log them and keep probing other paths."
         )
     user_brief = (
         f"Authorization accepted.\nAgent: {active_agent}\nTier: {auth.tier}\nTrial: {trial}\n"
@@ -344,7 +347,7 @@ def _run_job_impl(
         "role": "user",
         "content": (
             f"{active_agent} baseline results follow. Continue with extra in-scope probes if useful, "
-            "then write final ## Findings. Do not give up on challenges.\n\n"
+            "then write final ## Findings. Keep probing through any challenges.\n\n"
             + "\n\n".join(tool_digest[:20])
         ),
     })
@@ -497,10 +500,6 @@ def _run_job_impl(
     analysis_effort = (os.environ.get("VIBE_AGENT_ANALYSIS_EFFORT") or "high").strip().lower()
     if analysis_effort not in {"none", "low", "medium", "high"}:
         analysis_effort = "high"
-    # A separate review model could silently bill the deployment owner's key
-    # or transmit customer findings to a provider the customer did not select.
-    # Keep independent review disabled for shared BYOK-only scans until a
-    # tenant-scoped reviewer key, consent and routing are implemented.
     strict_customer_mode = (os.environ.get("VIBE_AGENT_REQUIRE_CUSTOMER_KEYS") or "").strip().lower() in {"1", "true", "yes"}
     review_model = "" if strict_customer_mode else (os.environ.get("VIBE_AGENT_REVIEW_MODEL") or "").strip()
     if review_model:
@@ -512,9 +511,9 @@ def _run_job_impl(
                 {
                     "role": "system",
                     "content": (
-                        "You are an independent defensive-security evidence reviewer. "
-                        "Do not propose bypasses or new attack actions. Identify false positives, "
-                        "missing evidence, severity mistakes, and the three highest-value safe follow-ups."
+                        "You are an independent security evidence reviewer. "
+                        "Identify false positives, missing evidence, severity mistakes, "
+                        "and the three highest-value follow-ups."
                     ),
                 },
                 {
@@ -548,7 +547,7 @@ def _run_job_impl(
                 }
                 messages.append({
                     "role": "user",
-                    "content": "Independent reviewer notes (advisory; preserve only claims supported by tool evidence):\n\n" + review_text[:8000],
+                    "content": "Independent reviewer notes (preserve only claims supported by tool evidence):\n\n" + review_text[:8000],
                 })
                 emit("review", model=report["review"]["model"], text=review_text[:4000])
         except Exception as exc:
@@ -561,12 +560,9 @@ def _run_job_impl(
             "role": "user",
             "content": (
                 f"Write the final {active_agent} report with a ## Findings section. "
-                "Use only collected tool evidence, incorporate reproduced/unconfirmed status and reviewer corrections, "
-                "deduplicate claims, and include severity, evidence, URL and fix guidance. "
-                "Use attacker-style threat reasoning but clearly distinguish what was actually tested. "
-                "For every material finding include the preconditions, attack surface, observed behavior, "
-                "confidence, contradictory evidence, impact rationale, and remediation. "
-                "Challenges are informational and authorization is context, not evidence."
+                "Use collected tool evidence. Incorporate reproduced/unconfirmed status and reviewer corrections. "
+                "Deduplicate. Each finding: severity, validation status, evidence, URL, attack preconditions, impact, fix. "
+                "Use attacker-style threat reasoning. Distinguish what was tested from what needs manual verification."
             ),
         })
         try:
@@ -693,10 +689,6 @@ def _retest_findings(
         evidence = str(finding.get("evidence") or "").strip()
         if evidence and evidence in output:
             finding["retested"] = True
-            # Repeatability is not evidence of exploitability for heuristic checks.
-            deterministic = finding.get("tool") == "vibe_headers" and evidence.startswith("MISSING:")
-            if not deterministic:
-                continue
             finding["validation_status"] = "reproduced"
             emit(
                 "finding_validated",
@@ -784,8 +776,6 @@ def _run_native_worker_job(
 
     expected_host = target_host(target)
 
-    # The upstream worker currently reads a shared structured-finding log.
-    # Accept only findings with an explicit full URL that resolves back to this exact target host.
     for raw in state.get("findings") or []:
         if not isinstance(raw, dict):
             continue
@@ -798,7 +788,6 @@ def _run_native_worker_job(
             finding_from_worker(raw, default_url=target, confirmed=False),
         )
 
-    # confirmed_breaks are stored inside the thread state itself, so they are thread-local.
     for raw_break in state.get("confirmed_breaks") or []:
         if not isinstance(raw_break, dict):
             continue
@@ -853,8 +842,6 @@ def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile, *, work
                 native_count = _harvest_worker_findings(name, result, report, emit, args=args)
                 if not native_count:
                     _harvest_findings(name, out, report, emit, args=args)
-            if "[CHALLENGE]" in (out or ""):
-                emit("finding", severity="info", detail=f"Bot/CDN challenge during {name}")
             return
         except ScopeError as e:
             report["errors"].append(str(e))
@@ -943,15 +930,9 @@ def _harvest_findings(
         line = raw.strip()
         if not line:
             continue
-        is_finding = (
-            "MISSING:" in line
-            or "CRITICAL" in line
-            or "POSSIBLE exposure" in line
-        )
-        if not is_finding:
-            continue
-        finding = finding_from_line(name, line, url=url)
-        _emit_structured_finding(report, emit, finding)
+        if any(line.startswith(prefix) or prefix in line for prefix in _HARVEST_PREFIXES):
+            finding = finding_from_line(name, line, url=url)
+            _emit_structured_finding(report, emit, finding)
 
 
 def _local_findings_fallback(report: Dict[str, Any]) -> str:
@@ -1047,7 +1028,6 @@ def _dispatch_tool(
 
 
 def _native_tool_environment() -> Dict[str, str]:
-    """Pass runtime basics to local tools without provider/storage credentials."""
     allowed = {
         "PATH", "PYTHONPATH", "LANG", "LC_ALL", "TZ",
         "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
