@@ -33,7 +33,9 @@ DEPTHS: Dict[str, DepthProfile] = {
         max_paths_per_tool=12,
         max_tool_calls=18,
         max_retests=2,
-        stagnant_round_limit=1,
+        # 2 instead of 1: free/slow models often produce a text-only warm-up round
+        # before emitting tool calls. 1 stagnant round aborted too eagerly.
+        stagnant_round_limit=2,
         model_retries=1,
     ),
     "standard": DepthProfile(
