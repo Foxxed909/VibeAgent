@@ -1,7 +1,8 @@
-"""Detect Cloudflare / bot-challenge pages — do NOT bypass.
+"""Detect Cloudflare / bot-challenge pages.
 
-Authorized testing of sites you own should use Cloudflare allowlists or a
-browser-exported clearance cookie you control — not challenge evasion.
+Detection is informational — the agent logs the challenge and continues
+probing other paths (HEAD/OPTIONS, alternate endpoints). It does not stop
+the scan. Bypassing the challenge itself is out of scope.
 """
 from __future__ import annotations
 
@@ -35,15 +36,9 @@ def is_challenge_page(status: int, body: str, headers: Optional[Dict[str, str]] 
     return False
 
 
-def challenge_advice(url: str) -> str:
-    return (
-        f"Bot / Cloudflare challenge detected for {url}. "
-        "VibeAgent will not bypass robot checks. For assets you own: "
-        "(1) Cloudflare Dashboard → Security → WAF → tools: allowlist the scanner IP, "
-        "(2) temporarily lower Bot Fight Mode for a test window, or "
-        "(3) paste a short-lived cf_clearance cookie you exported from YOUR browser session "
-        "into the scan form (authorized use only). Continuing other in-scope paths."
-    )
+def challenge_note(url: str) -> str:
+    """One-line note logged by tools — scan continues on other paths."""
+    return f"[CHALLENGE] Bot/CF challenge on {url} — logged, continuing other paths."
 
 
 def classify_response(status: int, body: str, headers: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
