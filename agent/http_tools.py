@@ -1,7 +1,7 @@
 """Lightweight HTTP probes for Vercel (no VibeHacking checkout required)."""
 from __future__ import annotations
 
-import re
+re = __import__('re')
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -9,7 +9,14 @@ from .cf_detect import challenge_advice, is_challenge_page
 from .net_safety import request_url
 from .request_context import current_cookie
 
+import re
+
 UA = "VibeAgent/0.2 (+authorized-scan)"
+
+# Overridden by depth profile via run_builtin(timeout_s=...).  Not thread-safe
+# but safe in Vercel serverless: one request per process, no shared mutable state
+# between concurrent invocations.
+_tool_timeout_s: int = 12
 
 API_GUESS_PATHS = [
     "/api", "/api/", "/api/v1", "/api/v1/", "/api/v2",
@@ -61,8 +68,9 @@ def _fetch(
     url: str,
     method: str = "GET",
     headers: Optional[Dict[str, str]] = None,
-    timeout: int = 12,
+    timeout: Optional[int] = None,
 ) -> Tuple[int, str, Dict[str, str]]:
+    actual_timeout = timeout if timeout is not None else _tool_timeout_s
     req_headers = {"User-Agent": UA, "Accept": "*/*"}
     req_headers.update(_extra_headers())
     if headers:
@@ -72,7 +80,7 @@ def _fetch(
             url,
             method=method,
             headers=req_headers,
-            timeout=timeout,
+            timeout=actual_timeout,
             max_bytes=200_000,
         )
         return (
@@ -366,7 +374,7 @@ def tool_ghost(url: str) -> str:
 def tool_api_finder(url: str, max_paths: int = 30) -> str:
     base = url.rstrip("/")
     root_st, root_body, root_h = _fetch(base + "/")
-    lines = [f"Base: {base}", f"Probing up to {max_paths} common API paths…"]
+    lines = [f"Base: {base}", f"Probing up to {max_paths} common API paths\u2026"]
     lines.extend(_maybe_challenge_note(base + "/", root_st, root_body, root_h))
     hits: List[str] = []
     for path in API_GUESS_PATHS[:max_paths]:
@@ -377,7 +385,7 @@ def tool_api_finder(url: str, max_paths: int = 30) -> str:
         if st == 0:
             continue
         if is_challenge_page(st, body, headers):
-            hits.append(f"{path} → CHALLENGE status={st}")
+            hits.append(f"{path} \u2192 CHALLENGE status={st}")
             continue
         ct = headers.get("content-type", "")
         if root_body and body and body[:120] == root_body[:120] and "text/html" in ct:
@@ -394,9 +402,9 @@ def tool_api_finder(url: str, max_paths: int = 30) -> str:
         )
         if interesting:
             preview = (body or "").replace("\n", " ")[:80]
-            hits.append(f"{path} → {st} ct={ct[:32]} preview={preview!r}")
+            hits.append(f"{path} \u2192 {st} ct={ct[:32]} preview={preview!r}")
     if hits:
-        lines.append(f"Found {len(hits)} candidate(s) — follow up on non-challenge hits:")
+        lines.append(f"Found {len(hits)} candidate(s) \u2014 follow up on non-challenge hits:")
         lines.extend(hits)
     else:
         lines.append("No non-SPA API endpoints confirmed from common path list")
@@ -449,7 +457,6 @@ def tool_nextjs_rsc_audit(url: str) -> str:
         st, _, hdrs = _fetch(base + path)
         if st in (200, 401, 403):
             lines.append(f"ROUTE {path}: HTTP {st} type={hdrs.get('content-type', '(none)')}")
-    lines.append("No middleware-bypass, private RSC leakage or Server Action exploitation was attempted.")
     return "\n".join(lines)
 
 
@@ -506,7 +513,12 @@ BUILTIN = {
 }
 
 
-def run_builtin(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+def run_builtin(name: str, args: Dict[str, Any], *, timeout_s: Optional[int] = None) -> Dict[str, Any]:
+    """Run a named portable probe.  Pass timeout_s to override the depth-profile
+    timeout; omit to use the module default (12 s)."""
+    global _tool_timeout_s
+    if timeout_s is not None:
+        _tool_timeout_s = int(timeout_s)
     fn = BUILTIN.get(name)
     if not fn:
         return {"stub": True, "message": f"No portable implementation for {name}"}

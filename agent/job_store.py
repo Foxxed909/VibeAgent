@@ -65,12 +65,18 @@ def _kv_command(*args: Any) -> Any:
 
 
 def save_job(report: Dict[str, Any]) -> str:
+    """Persist a completed or in-progress report.
+
+    Callers are responsible for invoking ensure_durable_store() before
+    starting a scan on hosted environments. save_job itself does not call
+    ensure_durable_store() so that it can be used safely by the queue worker,
+    which runs outside of the Vercel serverless context.
+    """
     job_id = str(report.get("job_id") or "").strip()
     if not _valid_job_id(job_id):
         raise ValueError("invalid job_id")
     payload = json.dumps(report)
 
-    ensure_durable_store()
     if _kv_enabled():
         _kv_command("SET", _kv_key(job_id), payload, "EX", TTL_SECONDS)
         _kv_command("LREM", JOBS_INDEX_KEY, 0, job_id)

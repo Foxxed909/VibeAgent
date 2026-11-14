@@ -50,7 +50,7 @@ except ImportError:
 try:
     from .http_tools import run_builtin
 except ImportError:
-    def run_builtin(name: str, args: Dict[str, Any]) -> Dict[str, Any]:  # type: ignore
+    def run_builtin(name: str, args: Dict[str, Any], *, timeout_s: Optional[int] = None) -> Dict[str, Any]:  # type: ignore
         return {"stub": True, "message": f"http_tools missing for {name}"}
 
 VIBEHACKING_ROOT = os.environ.get("VIBEHACKING_ROOT", "")
@@ -105,6 +105,7 @@ def run_job(
             agent_mode=agent_mode,
             execution_backend=execution_backend,
             ownership_proofs=ownership_proofs,
+            provider_keys=provider_keys,
             should_cancel=should_cancel,
         )
     finally:
@@ -126,8 +127,15 @@ def _run_job_impl(
     agent_mode: str = "vibe",
     execution_backend: str = "portable",
     ownership_proofs: Optional[Dict[str, str]] = None,
+    provider_keys: Optional[Dict[str, str]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
+    # provider_keys are already set in context by run_job before this call.
+    # The parameter is kept here so the function is self-contained and callers
+    # (e.g. tests) can pass keys without going through run_job.
+    if provider_keys is not None:
+        set_provider_keys(provider_keys)
+
     auth = auth.validated()
     trial = is_valid_trial_code(auth.access_code)
     job_id = job_id or secrets.token_urlsafe(18)
@@ -234,7 +242,7 @@ def _run_job_impl(
             f"Force api_finder={profile.force_api_finder}, follow_up={profile.follow_up_on_hits}",
             f"Retries={profile.tool_retries}, timeout={profile.tool_timeout_s}s",
             f"Tool budget={profile.max_tool_calls}, retest budget={profile.max_retests}",
-            "Loop: baseline → investigate → reproduce → independent review → synthesize",
+            "Loop: baseline \u2192 investigate \u2192 reproduce \u2192 independent review \u2192 synthesize",
         ]
         if execution_backend == "native-worker":
             report["native_worker_capabilities"] = native_worker_capabilities(auth.targets, agent_mode=agent_mode)
@@ -497,10 +505,6 @@ def _run_job_impl(
     analysis_effort = (os.environ.get("VIBE_AGENT_ANALYSIS_EFFORT") or "high").strip().lower()
     if analysis_effort not in {"none", "low", "medium", "high"}:
         analysis_effort = "high"
-    # A separate review model could silently bill the deployment owner's key
-    # or transmit customer findings to a provider the customer did not select.
-    # Keep independent review disabled for shared BYOK-only scans until a
-    # tenant-scoped reviewer key, consent and routing are implemented.
     strict_customer_mode = (os.environ.get("VIBE_AGENT_REQUIRE_CUSTOMER_KEYS") or "").strip().lower() in {"1", "true", "yes"}
     review_model = "" if strict_customer_mode else (os.environ.get("VIBE_AGENT_REVIEW_MODEL") or "").strip()
     if review_model:
@@ -693,7 +697,6 @@ def _retest_findings(
         evidence = str(finding.get("evidence") or "").strip()
         if evidence and evidence in output:
             finding["retested"] = True
-            # Repeatability is not evidence of exploitability for heuristic checks.
             deterministic = finding.get("tool") == "vibe_headers" and evidence.startswith("MISSING:")
             if not deterministic:
                 continue
@@ -784,8 +787,6 @@ def _run_native_worker_job(
 
     expected_host = target_host(target)
 
-    # The upstream worker currently reads a shared structured-finding log.
-    # Accept only findings with an explicit full URL that resolves back to this exact target host.
     for raw in state.get("findings") or []:
         if not isinstance(raw, dict):
             continue
@@ -798,7 +799,6 @@ def _run_native_worker_job(
             finding_from_worker(raw, default_url=target, confirmed=False),
         )
 
-    # confirmed_breaks are stored inside the thread state itself, so they are thread-local.
     for raw_break in state.get("confirmed_breaks") or []:
         if not isinstance(raw_break, dict):
             continue
@@ -868,19 +868,15 @@ def _run_one_tool(name, args, auth, report, emit, profile: DepthProfile, *, work
 
 
 def _parse_api_hits(base: str, stdout: str) -> List[str]:
+    """Extract follow-up URLs from api_finder output lines.
+
+    api_finder emits lines of the form:  /path/to/endpoint \u2192 <status> ...
+    The former FOUND/em-dash branch matched a format that no longer exists and
+    has been removed to avoid silently swallowing lines.
+    """
     hits = []
     for line in (stdout or "").splitlines():
-        if "FOUND" in line and "—" in line:
-            candidate = line.split("—", 1)[1].strip().split()[0].strip(".,;()")
-            if "://<host>" in candidate:
-                suffix = candidate.split("://<host>", 1)[1]
-                if suffix.startswith("/"):
-                    hits.append(base.rstrip("/") + suffix)
-                    continue
-            if candidate.startswith(("http://", "https://")):
-                hits.append(candidate)
-                continue
-        arrow = "→" if "→" in line else ("->" if "->" in line else None)
+        arrow = "\u2192" if "\u2192" in line else ("->" if "->" in line else None)
         if arrow is None:
             continue
         if "CHALLENGE" in line:
@@ -1029,7 +1025,7 @@ def _dispatch_tool(
     if name == "api_finder" and profile:
         args = dict(args)
         args["max_paths"] = profile.max_paths_per_tool
-    builtin = run_builtin(name, args)
+    builtin = run_builtin(name, args, timeout_s=profile.tool_timeout_s if profile else None)
     if not builtin.get("stub"):
         builtin = dict(builtin)
         builtin["backend"] = "portable"
