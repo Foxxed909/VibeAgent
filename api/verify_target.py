@@ -11,7 +11,17 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from agent.target_verification import VerificationError, approve_operator_target, confirm_challenge, create_challenge
-from api._security import apply_cors, read_json_body, require_allowed_origin, require_scan_access, require_operator_scan_access
+from api._security import (
+    apply_cors,
+    check_rate_limit,
+    read_json_body,
+    require_allowed_origin,
+    require_scan_access,
+    require_operator_scan_access,
+)
+
+_VERIFY_RATE_LIMIT = int(os.environ.get("VIBE_AGENT_VERIFY_RATE_LIMIT") or "20")
+_VERIFY_RATE_WINDOW = int(os.environ.get("VIBE_AGENT_VERIFY_RATE_WINDOW") or "600")
 
 
 class handler(BaseHTTPRequestHandler):
@@ -34,13 +44,22 @@ class handler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": "invalid JSON"})
         if not isinstance(data, dict):
             return self._json(400, {"ok": False, "error": "JSON body must be an object"})
+
         target = str(data.get("target") or "").strip()
         action = str(data.get("action") or "challenge").strip().lower()
+
+        # Operator approve bypasses the standard scan-access check but still
+        # requires a strong deployment token; apply the shared verify limit
+        # before that check so the token cannot be brute-forced.
+        if not check_rate_limit(self, "verify", _VERIFY_RATE_LIMIT, _VERIFY_RATE_WINDOW):
+            return
+
         if action == "approve":
             if not require_operator_scan_access(self):
                 return
         elif not require_scan_access(self, data.get("access_code")):
             return
+
         if not target:
             return self._json(400, {"ok": False, "error": "target required"})
         try:

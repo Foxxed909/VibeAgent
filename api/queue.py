@@ -16,9 +16,19 @@ from agent.queue_store import cancel, enqueue, require_queue, worker_online
 from agent.scope import Authorization, ScopeError, normalize_target
 from agent.target_verification import is_target_verified, is_operator_approved_proof
 from api._security import (
-    apply_cors, parse_provider_keys, read_json_body,
-    require_allowed_origin, require_scan_access, customer_keys_required,
+    apply_cors,
+    check_rate_limit,
+    parse_provider_keys,
+    read_json_body,
+    require_allowed_origin,
+    require_scan_access,
+    customer_keys_required,
 )
+
+# Shares the same env vars and bucket as api/scan.py so the per-client
+# job-submission cap is enforced regardless of which endpoint is used.
+_SCAN_RATE_LIMIT = int(os.environ.get("VIBE_AGENT_SCAN_RATE_LIMIT") or "5")
+_SCAN_RATE_WINDOW = int(os.environ.get("VIBE_AGENT_SCAN_RATE_WINDOW") or "3600")
 
 
 class handler(BaseHTTPRequestHandler):
@@ -47,6 +57,7 @@ class handler(BaseHTTPRequestHandler):
         except RuntimeError as exc:
             return self._json(503, {"ok": False, "error": str(exc)})
 
+        # Cancellations must always pass through; they consume no scan resources.
         if data.get("action") == "cancel":
             job_id, token = data.get("job_id"), data.get("cancel_token")
             if not isinstance(job_id, str) or not isinstance(token, str):
@@ -55,7 +66,14 @@ class handler(BaseHTTPRequestHandler):
                 cancelled = cancel(job_id, token)
             except ValueError:
                 cancelled = False
-            return self._json(202 if cancelled else 403, {"ok": cancelled, "status": "cancellation_requested" if cancelled else "denied"})
+            return self._json(
+                202 if cancelled else 403,
+                {"ok": cancelled, "status": "cancellation_requested" if cancelled else "denied"},
+            )
+
+        # Apply the shared scan rate-limit bucket before doing any further work.
+        if not check_rate_limit(self, "scan", _SCAN_RATE_LIMIT, _SCAN_RATE_WINDOW):
+            return
 
         fields = ("tier", "confirmation", "app_name", "company_name", "model",
                   "depth", "agent_mode", "execution_backend", "access_code", "cookie")
@@ -64,7 +82,6 @@ class handler(BaseHTTPRequestHandler):
         keys, key_error = parse_provider_keys(data)
         if key_error:
             return self._json(400, {"ok": False, "error": key_error})
-        # Never escrow BYOK secrets or browser cookies in Redis / a queued task.
         if keys or data.get("cookie"):
             return self._json(400, {"ok": False, "error": "queued scans use worker environment credentials; provider_keys and cookies are not accepted"})
         if data.get("stress_multiplier") or data.get("dry_run"):

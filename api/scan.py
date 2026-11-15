@@ -18,6 +18,7 @@ from agent.product import resolve_depth, resolve_stress
 from agent.target_verification import is_target_verified, is_operator_approved_proof
 from api._security import (
     apply_cors,
+    check_rate_limit,
     parse_provider_keys,
     read_json_body,
     require_allowed_origin,
@@ -25,6 +26,9 @@ from api._security import (
     customer_keys_required,
     personal_key_error,
 )
+
+_SCAN_RATE_LIMIT = int(os.environ.get("VIBE_AGENT_SCAN_RATE_LIMIT") or "5")
+_SCAN_RATE_WINDOW = int(os.environ.get("VIBE_AGENT_SCAN_RATE_WINDOW") or "3600")
 
 
 class handler(BaseHTTPRequestHandler):
@@ -80,6 +84,12 @@ class handler(BaseHTTPRequestHandler):
             access_code=data.get("access_code") or None,
         )
         dry = bool(data.get("dry_run"))
+
+        # Rate-limit live scans only; dry-run is cheap and used for client-side
+        # validation so it is intentionally excluded from the counter.
+        if not dry and not check_rate_limit(self, "scan", _SCAN_RATE_LIMIT, _SCAN_RATE_WINDOW):
+            return
+
         try:
             if not dry:
                 ensure_durable_store()

@@ -1,9 +1,10 @@
 """Shared HTTP security helpers for Vercel API handlers."""
 from __future__ import annotations
 
-import os
+import hashlib
 import hmac
 import json
+import os
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -27,7 +28,6 @@ def request_host(handler) -> str:
 def origin_is_allowed(handler) -> bool:
     origin = request_origin(handler)
     if not origin:
-        # CLI/server-to-server clients often omit Origin.
         return True
     if origin in _configured_origins():
         return True
@@ -183,7 +183,6 @@ def personal_key_error(model: Optional[str], provider_keys: Optional[dict]) -> O
     if name.startswith("google/"):
         return None if keys.get("google") else "Add your own Google API key in Settings > Keys."
     if name.startswith("gpt-") or name.startswith("openai/"):
-        # Model router expects plain gpt- IDs for direct provider-key use.
         if name.startswith("openai/"):
             return "Choose a direct OpenAI model for per-customer billing."
         return None if keys.get("openai") else "Add your own OpenAI key in Settings > Keys."
@@ -209,3 +208,69 @@ def parse_provider_keys(data: dict) -> tuple[Optional[dict[str, str]], Optional[
         if value:
             clean[provider] = value
     return clean, None
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+def _client_ip(handler) -> str:
+    """Extract the real client IP, respecting Vercel/Cloudflare forwarding headers.
+
+    X-Forwarded-For is set by Vercel’s edge and contains a comma-separated list
+    with the originating client IP first.  CF-Connecting-IP is set by Cloudflare
+    when the deployment sits behind it.
+    """
+    for header in ("X-Forwarded-For", "X-Real-Ip", "CF-Connecting-IP"):
+        val = (handler.headers.get(header) or "").split(",")[0].strip()
+        if val:
+            return val
+    return "unknown"
+
+
+def rate_limit_key(handler, bucket: str) -> str:
+    """Build a per-client rate-limit key for *bucket*.
+
+    Authenticated callers (those presenting a valid X-VibeAgent-Token) are
+    keyed by a short hash of their token so they get an independent bucket from
+    anonymous traffic and cannot be blocked by IP rotation.  Anonymous callers
+    are keyed by IP.
+    """
+    token = _header_token(handler, "X-VibeAgent-Token")
+    if token:
+        digest = hashlib.sha256(token.encode()).hexdigest()[:16]
+        return f"rl:{bucket}:tok:{digest}"
+    return f"rl:{bucket}:ip:{_client_ip(handler)}"
+
+
+def check_rate_limit(handler, bucket: str, limit: int, window_s: int) -> bool:
+    """Apply a rate limit and return True if the request should proceed.
+
+    Writes a 429 response with Retry-After and X-RateLimit-* headers and
+    returns False when the limit is exceeded.  Set VIBE_AGENT_RATE_LIMIT_ENABLED=0
+    to disable entirely (useful during local development).
+    """
+    if (os.environ.get("VIBE_AGENT_RATE_LIMIT_ENABLED") or "1").strip().lower() in {"0", "false", "no"}:
+        return True
+    from agent.rate_limit import check
+    key = rate_limit_key(handler, bucket)
+    result = check(key, limit, window_s)
+    if result.allowed:
+        return True
+    payload = json.dumps({
+        "ok": False,
+        "error": "rate limit exceeded; try again later",
+        "retry_after": result.reset_s,
+    }).encode("utf-8")
+    handler.send_response(429)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Retry-After", str(result.reset_s))
+    handler.send_header("X-RateLimit-Limit", str(result.limit))
+    handler.send_header("X-RateLimit-Remaining", "0")
+    handler.send_header("X-RateLimit-Reset", str(result.reset_s))
+    apply_cors(handler)
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.end_headers()
+    handler.wfile.write(payload)
+    return False
